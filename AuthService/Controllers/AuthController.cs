@@ -48,7 +48,7 @@ public class AuthController : ControllerBase
     [Authorize(Roles = "Admin")]
     public IActionResult AdminOnlyTest()
     {
-        var username = User.Identity?.Name ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+       var username = User.Identity?.Name;
         return Ok(new { message = $"Hello Admin (user id: {username}). You are authorized." });
     }
 }
