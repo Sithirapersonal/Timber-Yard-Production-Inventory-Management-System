@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using AuthService.Models;
 using AuthService.Repositories;
 using AuthService.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace AuthService.Controllers;
 
@@ -41,5 +42,13 @@ public class AuthController : ControllerBase
             Username = user.Username,
             Role = user.Role
         });
+    }
+
+    [HttpGet("admin-only")]
+    [Authorize(Roles = "Admin")]
+    public IActionResult AdminOnlyTest()
+    {
+        var username = User.Identity?.Name ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        return Ok(new { message = $"Hello Admin (user id: {username}). You are authorized." });
     }
 }
