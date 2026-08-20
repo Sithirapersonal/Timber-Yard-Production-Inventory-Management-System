@@ -5,6 +5,7 @@ using AuthService.Repositories;
 using AuthService.Services;
 using Scalar.AspNetCore;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -15,6 +16,7 @@ builder.Services.AddOpenApi();
 // Register our custom services
 builder.Services.AddScoped<UserRepository>();
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<LoginHistoryRepository>();
 
 // Configure JWT Authentication
 var jwtSecret = builder.Configuration["Jwt:Secret"]
