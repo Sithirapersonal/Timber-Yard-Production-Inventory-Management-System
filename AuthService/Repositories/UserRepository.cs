@@ -95,4 +95,60 @@ public class UserRepository
 
         return results;
     }
+    public async Task<bool> UpdateRoleAsync(int userId, string role)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "UPDATE Users SET Role = @Role WHERE UserId = @UserId";
+
+        await using var command = new MySqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@Role", role);
+        command.Parameters.AddWithValue("@UserId", userId);
+
+        var rowsAffected = await command.ExecuteNonQueryAsync();
+        return rowsAffected > 0;
+    }
+
+    public async Task<bool> UpdatePasswordAsync(int userId, string passwordHash)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "UPDATE Users SET PasswordHash = @PasswordHash WHERE UserId = @UserId";
+
+        await using var command = new MySqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@PasswordHash", passwordHash);
+        command.Parameters.AddWithValue("@UserId", userId);
+
+        var rowsAffected = await command.ExecuteNonQueryAsync();
+        return rowsAffected > 0;
+    }
+
+    public async Task<bool> UserIdExistsAsync(int userId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "SELECT COUNT(*) FROM Users WHERE UserId = @UserId";
+
+        await using var command = new MySqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@UserId", userId);
+
+        var count = Convert.ToInt32(await command.ExecuteScalarAsync());
+        return count > 0;
+    }
+    public async Task<bool> DeleteUserAsync(int userId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "DELETE FROM Users WHERE UserId = @UserId";
+
+        await using var command = new MySqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@UserId", userId);
+
+        var rowsAffected = await command.ExecuteNonQueryAsync();
+        return rowsAffected > 0;
+    }
 }

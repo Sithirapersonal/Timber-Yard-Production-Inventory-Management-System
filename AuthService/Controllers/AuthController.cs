@@ -109,4 +109,54 @@ public class AuthController : ControllerBase
         var history = await _loginHistoryRepository.GetAllAsync();
         return Ok(history);
     }
+    [HttpPut("users/{id}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateUserRequest request)
+    {
+        if (!await _userRepository.UserIdExistsAsync(id))
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Role) && string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequest(new { message = "Provide a role and/or a password to update." });
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Role))
+        {
+            var validRoles = new[] { "Supervisor", "Manager", "Admin" };
+            if (!validRoles.Contains(request.Role))
+            {
+                return BadRequest(new { message = "Role must be one of: Supervisor, Manager, Admin." });
+            }
+            await _userRepository.UpdateRoleAsync(id, request.Role);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Password))
+        {
+            var newHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+            await _userRepository.UpdatePasswordAsync(id, newHash);
+        }
+
+        return Ok(new { message = "User updated successfully." });
+    }
+    [HttpDelete("users/{id}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteUser(int id)
+    {
+        if (!await _userRepository.UserIdExistsAsync(id))
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        var currentUserIdClaim = User.FindFirst("userId")?.Value;
+        if (currentUserIdClaim == id.ToString())
+        {
+            return BadRequest(new { message = "You cannot delete your own account." });
+        }
+
+        await _userRepository.DeleteUserAsync(id);
+        return Ok(new { message = "User deleted successfully." });
+    }
 }

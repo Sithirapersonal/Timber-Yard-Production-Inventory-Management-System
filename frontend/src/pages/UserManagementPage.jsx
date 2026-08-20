@@ -20,6 +20,17 @@ export default function UserManagementPage() {
   const [addSuccess, setAddSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Edit User state
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editRole, setEditRole] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editError, setEditError] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Delete state
+  const [deletingUserId, setDeletingUserId] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+
   async function fetchUsers() {
     setLoadingUsers(true);
     try {
@@ -83,11 +94,89 @@ export default function UserManagementPage() {
       setNewUsername('');
       setNewPassword('');
       setNewRole('Supervisor');
-      fetchUsers(); // refresh the directory
+      fetchUsers();
     } catch {
       setAddError('Could not reach the server.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function startEdit(u) {
+    setEditingUserId(u.userId);
+    setEditRole(u.role);
+    setEditPassword('');
+    setEditError('');
+  }
+
+  function cancelEdit() {
+    setEditingUserId(null);
+    setEditRole('');
+    setEditPassword('');
+    setEditError('');
+  }
+
+  async function handleSaveEdit(userId) {
+    setEditError('');
+    setEditSubmitting(true);
+
+    const body = {};
+    if (editRole) body.role = editRole;
+    if (editPassword) body.password = editPassword;
+
+    try {
+      const res = await fetch(`${API_URL}/auth/users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setEditError(data.message || 'Failed to update user.');
+        return;
+      }
+
+      cancelEdit();
+      fetchUsers();
+    } catch {
+      setEditError('Could not reach the server.');
+    } finally {
+      setEditSubmitting(false);
+    }
+  }
+
+  async function handleDelete(userId, username) {
+    const confirmed = window.confirm(
+      `Are you sure you want to deactivate (permanently remove) "${username}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeleteError('');
+    setDeletingUserId(userId);
+
+    try {
+      const res = await fetch(`${API_URL}/auth/users/${userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.token}` },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setDeleteError(data.message || 'Failed to delete user.');
+        return;
+      }
+
+      fetchUsers();
+    } catch {
+      setDeleteError('Could not reach the server.');
+    } finally {
+      setDeletingUserId(null);
     }
   }
 
@@ -145,6 +234,7 @@ export default function UserManagementPage() {
       {/* User Directory */}
       <section style={{ marginBottom: 40 }}>
         <h3>User Directory</h3>
+        {deleteError && <p style={{ color: 'red' }}>{deleteError}</p>}
         {loadingUsers ? (
           <p>Loading...</p>
         ) : (
@@ -154,6 +244,7 @@ export default function UserManagementPage() {
                 <th>User ID</th>
                 <th>Username</th>
                 <th>Role</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -161,7 +252,52 @@ export default function UserManagementPage() {
                 <tr key={u.userId}>
                   <td>{u.userId}</td>
                   <td>{u.username}</td>
-                  <td>{u.role}</td>
+                  <td>
+                    {editingUserId === u.userId ? (
+                      <select value={editRole} onChange={(e) => setEditRole(e.target.value)}>
+                        <option value="Supervisor">Supervisor</option>
+                        <option value="Manager">Manager</option>
+                        <option value="Admin">Admin</option>
+                      </select>
+                    ) : (
+                      u.role
+                    )}
+                  </td>
+                  <td>
+                    {editingUserId === u.userId ? (
+                      <div>
+                        <input
+                          type="password"
+                          placeholder="New password (optional)"
+                          value={editPassword}
+                          onChange={(e) => setEditPassword(e.target.value)}
+                          style={{ marginBottom: 4, padding: 4, width: '100%' }}
+                        />
+                        {editError && <p style={{ color: 'red', margin: '4px 0' }}>{editError}</p>}
+                        <button
+                          onClick={() => handleSaveEdit(u.userId)}
+                          disabled={editSubmitting}
+                          style={{ marginRight: 6 }}
+                        >
+                          {editSubmitting ? 'Saving...' : 'Save'}
+                        </button>
+                        <button onClick={cancelEdit}>Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button onClick={() => startEdit(u)} style={{ marginRight: 6 }}>
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(u.userId, u.username)}
+                          disabled={deletingUserId === u.userId}
+                          style={{ color: 'red' }}
+                        >
+                          {deletingUserId === u.userId ? 'Deleting...' : 'Deactivate'}
+                        </button>
+                      </>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
