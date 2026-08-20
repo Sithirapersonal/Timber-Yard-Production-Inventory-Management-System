@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Layout from '../components/Layout';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import RoleBadge from '../components/ui/RoleBadge';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -180,161 +184,176 @@ export default function UserManagementPage() {
     }
   }
 
-  return (
-    <div style={{ padding: 40, fontFamily: 'sans-serif' }}>
-      <Link to="/">&larr; Back to Dashboard</Link>
-      <h2>User Management</h2>
+    return (
+    <Layout>
+      <Link to="/" className="text-sm text-fog hover:text-heartwood transition-colors">
+        &larr; Back to Dashboard
+      </Link>
+      <h1 className="font-display text-3xl font-semibold text-charcoal mt-2 mb-8">User Management</h1>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && (
+        <p className="text-rust text-sm mb-4 bg-rust/10 border border-rust/20 rounded-md px-3 py-2">{error}</p>
+      )}
 
-      {/* Add User Form */}
-      <section style={{ marginTop: 24, marginBottom: 40, maxWidth: 360 }}>
-        <h3>Add New Staff Account</h3>
-        <form onSubmit={handleAddUser}>
-          <div style={{ marginBottom: 10 }}>
-            <label>Username</label><br />
-            <input
-              type="text"
-              value={newUsername}
-              onChange={(e) => setNewUsername(e.target.value)}
-              required
-              style={{ width: '100%', padding: 6 }}
-            />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label>Password</label><br />
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              required
-              style={{ width: '100%', padding: 6 }}
-            />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label>Role</label><br />
-            <select
-              value={newRole}
-              onChange={(e) => setNewRole(e.target.value)}
-              style={{ width: '100%', padding: 6 }}
-            >
-              <option value="Supervisor">Supervisor</option>
-              <option value="Manager">Manager</option>
-              <option value="Admin">Admin</option>
-            </select>
-          </div>
-          {addError && <p style={{ color: 'red' }}>{addError}</p>}
-          {addSuccess && <p style={{ color: 'green' }}>{addSuccess}</p>}
-          <button type="submit" disabled={submitting} style={{ padding: '6px 14px' }}>
-            {submitting ? 'Creating...' : 'Add User'}
-          </button>
-        </form>
-      </section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* LEFT COLUMN: Add User + Directory */}
+        <div className="space-y-6">
+          <Card className="p-6">
+            <h2 className="font-display text-lg font-semibold text-charcoal mb-4">Add New Staff Account</h2>
+            <form onSubmit={handleAddUser}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-charcoal mb-1">Username</label>
+                <input
+                  type="text"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-md border border-charcoal/20 bg-sawdust/50 focus:outline-none focus:ring-2 focus:ring-heartwood/50 focus:border-heartwood text-sm"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-charcoal mb-1">Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-md border border-charcoal/20 bg-sawdust/50 focus:outline-none focus:ring-2 focus:ring-heartwood/50 focus:border-heartwood text-sm"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-charcoal mb-1">Role</label>
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md border border-charcoal/20 bg-sawdust/50 focus:outline-none focus:ring-2 focus:ring-heartwood/50 focus:border-heartwood text-sm"
+                >
+                  <option value="Supervisor">Supervisor</option>
+                  <option value="Manager">Manager</option>
+                  <option value="Admin">Admin</option>
+                </select>
+              </div>
+              {addError && <p className="text-rust text-sm mb-3">{addError}</p>}
+              {addSuccess && <p className="text-moss text-sm mb-3">{addSuccess}</p>}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? 'Creating…' : 'Add User'}
+              </Button>
+            </form>
+          </Card>
 
-      {/* User Directory */}
-      <section style={{ marginBottom: 40 }}>
-        <h3>User Directory</h3>
-        {deleteError && <p style={{ color: 'red' }}>{deleteError}</p>}
-        {loadingUsers ? (
-          <p>Loading...</p>
-        ) : (
-          <table border="1" cellPadding="8" style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th>User ID</th>
-                <th>Username</th>
-                <th>Role</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.userId}>
-                  <td>{u.userId}</td>
-                  <td>{u.username}</td>
-                  <td>
-                    {editingUserId === u.userId ? (
-                      <select value={editRole} onChange={(e) => setEditRole(e.target.value)}>
-                        <option value="Supervisor">Supervisor</option>
-                        <option value="Manager">Manager</option>
-                        <option value="Admin">Admin</option>
-                      </select>
-                    ) : (
-                      u.role
-                    )}
-                  </td>
-                  <td>
-                    {editingUserId === u.userId ? (
-                      <div>
-                        <input
-                          type="password"
-                          placeholder="New password (optional)"
-                          value={editPassword}
-                          onChange={(e) => setEditPassword(e.target.value)}
-                          style={{ marginBottom: 4, padding: 4, width: '100%' }}
-                        />
-                        {editError && <p style={{ color: 'red', margin: '4px 0' }}>{editError}</p>}
-                        <button
-                          onClick={() => handleSaveEdit(u.userId)}
-                          disabled={editSubmitting}
-                          style={{ marginRight: 6 }}
-                        >
-                          {editSubmitting ? 'Saving...' : 'Save'}
-                        </button>
-                        <button onClick={cancelEdit}>Cancel</button>
-                      </div>
-                    ) : (
-                      <>
-                        <button onClick={() => startEdit(u)} style={{ marginRight: 6 }}>
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(u.userId, u.username)}
-                          disabled={deletingUserId === u.userId}
-                          style={{ color: 'red' }}
-                        >
-                          {deletingUserId === u.userId ? 'Deleting...' : 'Deactivate'}
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+          <Card className="p-6">
+            <h2 className="font-display text-lg font-semibold text-charcoal mb-4">User Directory</h2>
+            {deleteError && <p className="text-rust text-sm mb-3">{deleteError}</p>}
+            {loadingUsers ? (
+              <p className="text-fog text-sm">Loading…</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-fog border-b border-charcoal/10">
+                      <th className="py-2 pr-3 font-mono">ID</th>
+                      <th className="py-2 pr-3">Username</th>
+                      <th className="py-2 pr-3">Role</th>
+                      <th className="py-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u) => (
+                      <tr key={u.userId} className="border-b border-charcoal/5 last:border-0">
+                        <td className="py-3 pr-3 font-mono text-fog">{u.userId}</td>
+                        <td className="py-3 pr-3 font-medium">{u.username}</td>
+                        <td className="py-3 pr-3">
+                          {editingUserId === u.userId ? (
+                            <select
+                              value={editRole}
+                              onChange={(e) => setEditRole(e.target.value)}
+                              className="border border-charcoal/20 rounded px-2 py-1 text-sm"
+                            >
+                              <option value="Supervisor">Supervisor</option>
+                              <option value="Manager">Manager</option>
+                              <option value="Admin">Admin</option>
+                            </select>
+                          ) : (
+                            <RoleBadge role={u.role} />
+                          )}
+                        </td>
+                        <td className="py-3">
+                          {editingUserId === u.userId ? (
+                            <div className="space-y-2 min-w-[160px]">
+                              <input
+                                type="password"
+                                placeholder="New password (optional)"
+                                value={editPassword}
+                                onChange={(e) => setEditPassword(e.target.value)}
+                                className="w-full border border-charcoal/20 rounded px-2 py-1 text-sm"
+                              />
+                              {editError && <p className="text-rust text-xs">{editError}</p>}
+                              <div className="flex gap-2">
+                                <Button variant="primary" onClick={() => handleSaveEdit(u.userId)} disabled={editSubmitting}>
+                                  {editSubmitting ? 'Saving…' : 'Save'}
+                                </Button>
+                                <Button variant="ghost" onClick={cancelEdit}>Cancel</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2">
+                              <Button variant="ghost" onClick={() => startEdit(u)}>Edit</Button>
+                              <Button
+                                variant="danger"
+                                onClick={() => handleDelete(u.userId, u.username)}
+                                disabled={deletingUserId === u.userId}
+                              >
+                                {deletingUserId === u.userId ? 'Deleting…' : 'Deactivate'}
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
 
-      {/* Login History */}
-      <section>
-        <h3>Login / Audit History</h3>
-        {loadingHistory ? (
-          <p>Loading...</p>
-        ) : (
-          <table border="1" cellPadding="8" style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th>Username</th>
-                <th>Result</th>
-                <th>Attempted At</th>
-                <th>IP Address</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((h) => (
-                <tr key={h.loginHistoryId}>
-                  <td>{h.username}</td>
-                  <td style={{ color: h.success ? 'green' : 'red' }}>
-                    {h.success ? 'Success' : 'Failed'}
-                  </td>
-                  <td>{new Date(h.attemptedAt).toLocaleString()}</td>
-                  <td>{h.ipAddress || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </div>
+        {/* RIGHT COLUMN: Login / Audit History */}
+        <Card className="p-6">
+          <h2 className="font-display text-lg font-semibold text-charcoal mb-4">Login / Audit History</h2>
+          {loadingHistory ? (
+            <p className="text-fog text-sm">Loading…</p>
+          ) : (
+            <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-left text-xs uppercase tracking-wide text-fog border-b border-charcoal/10">
+                    <th className="py-2 pr-3">Username</th>
+                    <th className="py-2 pr-3">Result</th>
+                    <th className="py-2 pr-3">Attempted At</th>
+                    <th className="py-2 font-mono">IP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h) => (
+                    <tr key={h.loginHistoryId} className="border-b border-charcoal/5 last:border-0">
+                      <td className="py-2.5 pr-3 font-medium">{h.username}</td>
+                      <td className="py-2.5 pr-3">
+                        <span className={`text-xs font-semibold ${h.success ? 'text-moss' : 'text-rust'}`}>
+                          {h.success ? 'Success' : 'Failed'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3 text-fog text-xs">
+                        {new Date(h.attemptedAt).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 font-mono text-xs text-fog">{h.ipAddress || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+    </Layout>
   );
 }

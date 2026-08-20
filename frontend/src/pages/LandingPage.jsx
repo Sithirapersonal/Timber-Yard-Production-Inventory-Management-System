@@ -1,56 +1,37 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Layout from '../components/Layout';
+import Card from '../components/ui/Card';
 
 export default function LandingPage() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
 
   const isAdmin = user.role === 'Admin';
-  const isManager = user.role === 'Manager';
-  const isSupervisor = user.role === 'Supervisor';
 
   return (
-    <div style={{ padding: 40, fontFamily: 'sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2>Timber Yard — Dashboard</h2>
-          <p>Welcome, {user.username} ({user.role})</p>
-        </div>
-        <button onClick={logout}>Log Out</button>
+    <Layout>
+      <h1 className="font-display text-3xl font-semibold text-charcoal mb-1">Dashboard</h1>
+      <p className="text-fog mb-8">Welcome back, {user.username}.</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <NavCard to="/log-intake" title="Log Intake" desc="Record incoming timber deliveries" />
+        <NavCard to="/sawing" title="Sawing Process" desc="Track raw logs through the sawmill" />
+        <NavCard to="/treatment" title="Treatment Process" desc="Manage chemical treatment batches" />
+        {isAdmin && (
+          <NavCard to="/users" title="User Management" desc="Add, edit, and deactivate staff accounts" highlight />
+        )}
       </div>
-
-      <div style={{ marginTop: 32, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {/* Log Intake — every role sees this, scope differs by role inside the page itself */}
-        <NavButton to="/log-intake" label="Log Intake" />
-
-        {/* Sawing and Treatment — every role sees these */}
-        <NavButton to="/sawing" label="Sawing Process" />
-        <NavButton to="/treatment" label="Treatment Process" />
-
-        {/* Admin-only */}
-        {isAdmin && <NavButton to="/users" label="User Management" highlight />}
-      </div>
-    </div>
+    </Layout>
   );
 }
 
-function NavButton({ to, label, highlight }) {
+function NavCard({ to, title, desc, highlight }) {
   return (
-    <Link
-      to={to}
-      style={{
-        display: 'block',
-        padding: '20px 32px',
-        border: '1px solid #ccc',
-        borderRadius: 8,
-        textDecoration: 'none',
-        color: '#222',
-        backgroundColor: highlight ? '#eef' : '#fafafa',
-        minWidth: 160,
-        textAlign: 'center',
-        fontWeight: 500,
-      }}
-    >
-      {label}
+    <Link to={to}>
+      <Card className={`p-6 h-full hover:shadow-md transition-shadow ${highlight ? 'border-heartwood/40' : ''}`}>
+        <h3 className="font-display text-lg font-semibold text-charcoal mb-1">{title}</h3>
+        <p className="text-sm text-fog">{desc}</p>
+      </Card>
     </Link>
   );
 }

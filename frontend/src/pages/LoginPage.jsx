@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Button from '../components/ui/Button';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -42,36 +43,56 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ maxWidth: 360, margin: '80px auto', fontFamily: 'sans-serif' }}>
-      <h2>Timber Yard — Staff Login</h2>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 12 }}>
-          <label htmlFor="username">Username</label><br />
-          <input
-            id="username"
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-            style={{ width: '100%', padding: 8 }}
-          />
+    <div className="min-h-screen bg-charcoal flex items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="inline-block border-2 border-heartwood text-heartwood font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm -rotate-2 mb-4">
+            TIMBER YARD
+          </div>
+          <h1 className="font-display text-3xl font-semibold text-white">Staff Login</h1>
+          <p className="text-white/50 text-sm mt-1">Production &amp; Inventory Management</p>
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <label htmlFor="password">Password</label><br />
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{ width: '100%', padding: 8 }}
-          />
-        </div>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" disabled={submitting} style={{ padding: '8px 16px' }}>
-          {submitting ? 'Logging in...' : 'Log In'}
-        </button>
-      </form>
+
+        <form onSubmit={handleSubmit} className="bg-sawdust rounded-lg shadow-xl p-8">
+          <div className="mb-4">
+            <label htmlFor="username" className="block text-sm font-medium text-charcoal mb-1">
+              Username
+            </label>
+            <input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoFocus
+              className="w-full px-3 py-2 rounded-md border border-charcoal/20 bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/50 focus:border-heartwood"
+            />
+          </div>
+          <div className="mb-6">
+            <label htmlFor="password" className="block text-sm font-medium text-charcoal mb-1">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full px-3 py-2 rounded-md border border-charcoal/20 bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/50 focus:border-heartwood"
+            />
+          </div>
+
+          {error && (
+            <p className="text-rust text-sm mb-4 bg-rust/10 border border-rust/20 rounded-md px-3 py-2">
+              {error}
+            </p>
+          )}
+
+          <Button type="submit" disabled={submitting} className="w-full">
+            {submitting ? 'Logging in…' : 'Log In'}
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }
