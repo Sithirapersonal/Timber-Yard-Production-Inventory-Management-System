@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS Users (
+    UserId INT AUTO_INCREMENT PRIMARY KEY,
+    Username VARCHAR(50) UNIQUE NOT NULL,
+    PasswordHash VARCHAR(255) NOT NULL,
+    Role ENUM('Supervisor', 'Manager', 'Admin') NOT NULL,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);

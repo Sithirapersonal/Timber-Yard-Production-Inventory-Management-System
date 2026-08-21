@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", serif;
+  --font-sans: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-charcoal: #2B2622;
+  --color-sawdust: #F1ECE1;
+  --color-heartwood: #B8632A;
+  --color-heartwood-dark: #9A5122;
+  --color-moss: #5C7A5E;
+  --color-rust: #A13D2B;
+  --color-fog: #6E6A63;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-sawdust);
+  color: var(--color-charcoal);
+}
