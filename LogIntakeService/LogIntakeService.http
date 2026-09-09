@@ -1,0 +1,6 @@
+@LogIntakeService_HostAddress = http://localhost:5201
+
+GET {{LogIntakeService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
