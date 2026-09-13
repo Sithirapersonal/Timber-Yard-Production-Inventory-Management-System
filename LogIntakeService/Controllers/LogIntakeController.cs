@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using LogIntakeService.DTOs;
 using LogIntakeService.Models;
 using LogIntakeService.Repositories;
@@ -7,6 +8,7 @@ namespace LogIntakeService.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class LogIntakeController : ControllerBase
 {
     private readonly ILogIntakeRepository _repository;
@@ -17,6 +19,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpPost("deliveries")]
+    [Authorize(Roles = "Admin,YardClerk,YardManager")]
     public async Task<IActionResult> RecordDelivery([FromBody] CreateDeliveryDto dto)
     {
         var delivery = new TimberDelivery
@@ -48,6 +51,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpPost("stock/adjust")]
+    [Authorize(Roles = "Admin,YardManager")]
     public async Task<IActionResult> AdjustStock([FromBody] StockAdjustmentDto dto)
     {
         var adjustment = new StockAdjustment
@@ -69,6 +73,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpPut("stock/threshold")]
+    [Authorize(Roles = "Admin,YardManager")]
     public async Task<IActionResult> UpdateThreshold([FromBody] UpdateThresholdDto dto)
     {
         var updated = await _repository.UpdateThresholdAsync(
@@ -93,6 +98,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpDelete("suppliers/{id:int}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeactivateSupplier(int id)
     {
         var deactivated = await _repository.DeactivateSupplierAsync(id);
