@@ -1,0 +1,35 @@
+name: sawmill-service-ci-cd
+on:
+  push:
+    branches: [develop, main]
+    paths: ['SawmillService/**']
+  pull_request:
+    branches: [develop, main]
+    paths: ['SawmillService/**']
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore SawmillService
+      - run: dotnet build SawmillService --no-restore
+
+  deploy:
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet publish SawmillService -c Release -o SawmillService/publish
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'timber-yard-sawmill-service'
+          publish-profile: ${{ secrets.AZURE_SAWMILL_SERVICE_PUBLISH_PROFILE }}
+          package: SawmillService/publish
