@@ -1,0 +1,62 @@
+name: Build and Deploy Log Intake Service
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'LogIntakeService/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'LogIntakeService/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: |
+          dotnet restore LogIntakeService/LogIntakeService.csproj
+          dotnet restore LogIntakeService.Tests/LogIntakeService.Tests.csproj
+
+      - name: Build
+        run: |
+          dotnet build LogIntakeService/LogIntakeService.csproj --configuration Release --no-restore
+          dotnet build LogIntakeService.Tests/LogIntakeService.Tests.csproj --configuration Release --no-restore
+
+      - name: Run xUnit Tests
+        run: dotnet test LogIntakeService.Tests/LogIntakeService.Tests.csproj --configuration Release --no-build --verbosity normal
+
+      - name: Publish
+        run: dotnet publish LogIntakeService/LogIntakeService.csproj --configuration Release --output ./publish
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-intake-app
+          path: ./publish
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: log-intake-app
+          path: ./publish
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'timber-yard-log-intake-service'
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_LOGINTAKE }}
+          package: ./publish
