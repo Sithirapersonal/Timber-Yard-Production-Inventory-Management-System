@@ -1,0 +1,55 @@
+name: logintake-service-ci-cd
+
+on:
+  push:
+    branches: [ develop, main ]
+    paths:
+      - 'LogIntakeService/**'
+      - 'LogIntakeService.Tests/**'
+      - '.github/workflows/logintake-service-ci-cd.yml'
+  pull_request:
+    branches: [ develop, main ]
+    paths:
+      - 'LogIntakeService/**'
+      - 'LogIntakeService.Tests/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: |
+          dotnet restore LogIntakeService/LogIntakeService.csproj
+          dotnet restore LogIntakeService.Tests/LogIntakeService.Tests.csproj
+
+      - name: Build Projects
+        run: |
+          dotnet build LogIntakeService/LogIntakeService.csproj --configuration Release --no-restore
+          dotnet build LogIntakeService.Tests/LogIntakeService.Tests.csproj --configuration Release --no-restore
+
+      - name: Run xUnit Unit Tests
+        run: dotnet test LogIntakeService.Tests/LogIntakeService.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  deploy:
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet publish LogIntakeService/LogIntakeService.csproj -c Release -o LogIntakeService/publish
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'timber-yard-log-intake-service'
+          publish-profile: ${{ secrets.AZURE_LOGINTAKE_SERVICE_PUBLISH_PROFILE }}
+          package: LogIntakeService/publish
