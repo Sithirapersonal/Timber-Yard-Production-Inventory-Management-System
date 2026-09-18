@@ -1,4 +1,4 @@
-﻿namespace LogIntakeService.Models;
+namespace LogIntakeService.Models;
 
 public class Supplier
 {
@@ -6,6 +6,7 @@ public class Supplier
     public string SupplierName { get; set; } = string.Empty;
     public string? ContactNumber { get; set; }
     public string? Email { get; set; }
+    public string? Address { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
 }

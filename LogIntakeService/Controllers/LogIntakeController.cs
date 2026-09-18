@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using LogIntakeService.DTOs;
 using LogIntakeService.Models;
@@ -19,20 +19,19 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpPost("deliveries")]
-    [Authorize(Roles = "Admin,YardClerk,YardManager")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
     public async Task<IActionResult> RecordDelivery([FromBody] CreateDeliveryDto dto)
     {
         var delivery = new TimberDelivery
         {
             SupplierId = dto.SupplierId,
-            Species = dto.Species.Trim(),
-            Grade = dto.Grade.Trim().ToUpperInvariant(),
-            VolumeM3 = dto.VolumeM3,
             VehicleNumber = dto.VehicleNumber?.Trim(),
+            LogCount = dto.LogCount ?? dto.Logs.Count,
+            Notes = dto.Notes?.Trim(),
             ReceivedBy = dto.ReceivedBy
         };
 
-        var deliveryId = await _repository.RecordDeliveryAsync(delivery);
+        var deliveryId = await _repository.RecordDeliveryAsync(delivery, dto.Logs);
         return StatusCode(StatusCodes.Status201Created, new { deliveryId, message = "Delivery intake logged successfully." });
     }
 
@@ -50,8 +49,54 @@ public class LogIntakeController : ControllerBase
         return Ok(deliveries);
     }
 
+    [HttpGet("species")]
+    public async Task<IActionResult> GetSpecies()
+    {
+        var species = await _repository.GetSpeciesAsync();
+        return Ok(species);
+    }
+
+    [HttpGet("log-lengths")]
+    public async Task<IActionResult> GetLogLengths()
+    {
+        var lengths = await _repository.GetLogLengthsAsync();
+        return Ok(lengths);
+    }
+
+    [HttpGet("logs")]
+    public async Task<IActionResult> GetLogs(
+        [FromQuery] int? speciesId,
+        [FromQuery] string? species,
+        [FromQuery] int? lengthId,
+        [FromQuery] string? grade)
+    {
+        var logs = await _repository.GetLogsAsync(speciesId, species, lengthId, grade);
+        return Ok(logs);
+    }
+
+    [HttpPut("logs/{logId:int}/remove")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> RemoveLog(int logId, [FromBody] RemoveLogDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            return BadRequest(new { message = "Removal reason is required." });
+        }
+
+        var userIdClaim = User.FindFirst("userId")?.Value;
+        var userId = int.TryParse(userIdClaim, out var id) ? id : 1;
+
+        var removed = await _repository.RemoveLogAsync(logId, dto.Reason.Trim(), userId);
+        if (!removed)
+        {
+            return NotFound(new { message = "Log not found or cannot be removed (already consumed or removed)." });
+        }
+
+        return Ok(new { message = "Log removed from inventory successfully." });
+    }
+
     [HttpPost("stock/adjust")]
-    [Authorize(Roles = "Admin,YardManager")]
+    [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> AdjustStock([FromBody] StockAdjustmentDto dto)
     {
         var adjustment = new StockAdjustment
@@ -73,7 +118,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpPut("stock/threshold")]
-    [Authorize(Roles = "Admin,YardManager")]
+    [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> UpdateThreshold([FromBody] UpdateThresholdDto dto)
     {
         var updated = await _repository.UpdateThresholdAsync(
@@ -91,15 +136,44 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpGet("suppliers")]
-    public async Task<IActionResult> GetSuppliers()
+    public async Task<IActionResult> GetSuppliers([FromQuery] bool includeInactive = false)
     {
-        var suppliers = await _repository.GetActiveSuppliersAsync();
+        var suppliers = await _repository.GetActiveSuppliersAsync(includeInactive);
         return Ok(suppliers);
+    }
+
+    [HttpPost("suppliers")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> CreateSupplier([FromBody] CreateSupplierDto dto)
+    {
+        var supplier = new Supplier
+        {
+            SupplierName = dto.Name.Trim(),
+            ContactNumber = dto.PhoneNumber.Trim(),
+            Address = dto.Address?.Trim(),
+            IsActive = true
+        };
+
+        var supplierId = await _repository.AddSupplierAsync(supplier);
+        return StatusCode(StatusCodes.Status201Created, new { supplierId, message = "Supplier created successfully." });
+    }
+
+    [HttpPut("suppliers/{supplierId:int}/deactivate")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeactivateSupplier(int supplierId)
+    {
+        var deactivated = await _repository.DeactivateSupplierAsync(supplierId);
+        if (!deactivated)
+        {
+            return NotFound(new { message = "Active supplier not found." });
+        }
+
+        return Ok(new { message = "Supplier deactivated successfully." });
     }
 
     [HttpDelete("suppliers/{id:int}")]
     [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> DeactivateSupplier(int id)
+    public async Task<IActionResult> DeleteSupplier(int id)
     {
         var deactivated = await _repository.DeactivateSupplierAsync(id);
         if (!deactivated)
