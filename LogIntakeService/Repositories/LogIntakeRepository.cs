@@ -16,6 +16,44 @@ public class LogIntakeRepository : ILogIntakeRepository
             ?? throw new InvalidOperationException("LogIntakeDb connection string is not configured.");
     }
 
+    public async Task<int> FindOrCreateStockAsync(int speciesId, int lengthId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        return await FindOrCreateStockInternalAsync(speciesId, lengthId, connection, null);
+    }
+
+    private static async Task<int> FindOrCreateStockInternalAsync(
+        int speciesId, 
+        int lengthId, 
+        MySqlConnection connection, 
+        MySqlTransaction? transaction)
+    {
+        const string selectSql = "SELECT StockId FROM Stock WHERE SpeciesId = @SpeciesId AND LengthId = @LengthId;";
+        await using (var selectCmd = new MySqlCommand(selectSql, connection, transaction))
+        {
+            selectCmd.Parameters.AddWithValue("@SpeciesId", speciesId);
+            selectCmd.Parameters.AddWithValue("@LengthId", lengthId);
+            var existingId = await selectCmd.ExecuteScalarAsync();
+            if (existingId != null && existingId != DBNull.Value)
+            {
+                return Convert.ToInt32(existingId);
+            }
+        }
+
+        const string insertSql = @"
+            INSERT INTO Stock (SpeciesId, LengthId) VALUES (@SpeciesId, @LengthId)
+            ON DUPLICATE KEY UPDATE StockId = LAST_INSERT_ID(StockId);
+            SELECT LAST_INSERT_ID();";
+
+        await using (var insertCmd = new MySqlCommand(insertSql, connection, transaction))
+        {
+            insertCmd.Parameters.AddWithValue("@SpeciesId", speciesId);
+            insertCmd.Parameters.AddWithValue("@LengthId", lengthId);
+            return Convert.ToInt32(await insertCmd.ExecuteScalarAsync());
+        }
+    }
+
     public async Task<int> RecordDeliveryAsync(TimberDelivery delivery, IEnumerable<DeliveryLogEntryDto> logs)
     {
         await using var connection = new MySqlConnection(_connectionString);
@@ -52,8 +90,8 @@ public class LogIntakeRepository : ILogIntakeRepository
 
             // Insert each individual log in the transaction
             const string logSql = @"
-                INSERT INTO Logs (DeliveryId, SpeciesId, LengthId, Grade, GirthFt, VolumeM3, Status, CreatedAt)
-                VALUES (@DeliveryId, @SpeciesId, @LengthId, @Grade, @GirthFt, @VolumeM3, 'InStock', UTC_TIMESTAMP());";
+                INSERT INTO Logs (DeliveryId, StockId, GirthFt, VolumeM3, Status, CreatedAt)
+                VALUES (@DeliveryId, @StockId, @GirthFt, @VolumeM3, 'InStock', UTC_TIMESTAMP());";
 
             foreach (var log in logs)
             {
@@ -62,13 +100,12 @@ public class LogIntakeRepository : ILogIntakeRepository
                     throw new InvalidOperationException($"Invalid LengthId: {log.LengthId}");
                 }
 
+                var stockId = await FindOrCreateStockInternalAsync(log.SpeciesId, log.LengthId, connection, (MySqlTransaction)transaction);
                 var volumeM3 = LogVolumeCalculator.CalculateVolumeM3(lengthFt, log.GirthFt);
 
                 await using var logCmd = new MySqlCommand(logSql, connection, (MySqlTransaction)transaction);
                 logCmd.Parameters.AddWithValue("@DeliveryId", deliveryId);
-                logCmd.Parameters.AddWithValue("@SpeciesId", log.SpeciesId);
-                logCmd.Parameters.AddWithValue("@LengthId", log.LengthId);
-                logCmd.Parameters.AddWithValue("@Grade", log.Grade.Trim().ToUpperInvariant());
+                logCmd.Parameters.AddWithValue("@StockId", stockId);
                 logCmd.Parameters.AddWithValue("@GirthFt", log.GirthFt);
                 logCmd.Parameters.AddWithValue("@VolumeM3", volumeM3);
                 await logCmd.ExecuteNonQueryAsync();
@@ -92,21 +129,21 @@ public class LogIntakeRepository : ILogIntakeRepository
 
         const string sql = @"
             SELECT 
-                s.SpeciesId,
-                s.Name AS SpeciesName,
-                l.LengthId,
-                l.LengthFt,
-                lg.Grade,
+                st.StockId,
+                st.SpeciesId,
+                sp.Name AS SpeciesName,
+                st.LengthId,
+                ll.LengthFt,
                 COUNT(lg.LogId) AS LogCount,
                 COALESCE(SUM(lg.VolumeM3), 0.0000) AS TotalVolumeM3,
-                COALESCE(st.LowStockThreshold, 10.00) AS LowStockThreshold
-            FROM Logs lg
-            JOIN Species s ON lg.SpeciesId = s.SpeciesId
-            JOIN LogLengths l ON lg.LengthId = l.LengthId
-            LEFT JOIN StockThresholds st ON lg.SpeciesId = st.SpeciesId AND lg.LengthId = st.LengthId AND lg.Grade = st.Grade
-            WHERE lg.Status = 'InStock'
-            GROUP BY s.SpeciesId, s.Name, l.LengthId, l.LengthFt, lg.Grade, st.LowStockThreshold
-            ORDER BY s.Name, l.LengthFt, lg.Grade;";
+                COALESCE(sth.LowStockThreshold, 10.00) AS LowStockThreshold
+            FROM Stock st
+            JOIN Species sp ON st.SpeciesId = sp.SpeciesId
+            JOIN LogLengths ll ON st.LengthId = ll.LengthId
+            LEFT JOIN StockThresholds sth ON st.StockId = sth.StockId
+            LEFT JOIN Logs lg ON st.StockId = lg.StockId AND lg.Status = 'InStock'
+            GROUP BY st.StockId, st.SpeciesId, sp.Name, st.LengthId, ll.LengthFt, sth.LowStockThreshold
+            ORDER BY sp.Name, ll.LengthFt;";
 
         await using var cmd = new MySqlCommand(sql, connection);
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -115,11 +152,11 @@ public class LogIntakeRepository : ILogIntakeRepository
         {
             items.Add(new StockSummaryDto
             {
+                StockId = reader.GetInt32("StockId"),
                 SpeciesId = reader.GetInt32("SpeciesId"),
                 Species = reader.GetString("SpeciesName"),
                 LengthId = reader.GetInt32("LengthId"),
                 LengthFt = reader.GetDecimal("LengthFt"),
-                Grade = reader.GetString("Grade"),
                 LogCount = reader.GetInt32("LogCount"),
                 TotalVolumeM3 = reader.GetDecimal("TotalVolumeM3"),
                 LowStockThreshold = reader.GetDecimal("LowStockThreshold")
@@ -140,7 +177,6 @@ public class LogIntakeRepository : ILogIntakeRepository
                 d.SupplierId, 
                 s.SupplierName,
                 d.Species, 
-                d.Grade, 
                 d.VolumeM3, 
                 d.VehicleNumber, 
                 d.LogCount, 
@@ -162,7 +198,6 @@ public class LogIntakeRepository : ILogIntakeRepository
                 SupplierId = reader.GetInt32("SupplierId"),
                 SupplierName = reader.IsDBNull(reader.GetOrdinal("SupplierName")) ? null : reader.GetString("SupplierName"),
                 Species = reader.IsDBNull(reader.GetOrdinal("Species")) ? null : reader.GetString("Species"),
-                Grade = reader.IsDBNull(reader.GetOrdinal("Grade")) ? null : reader.GetString("Grade"),
                 VolumeM3 = reader.IsDBNull(reader.GetOrdinal("VolumeM3")) ? null : reader.GetDecimal("VolumeM3"),
                 VehicleNumber = reader.IsDBNull(reader.GetOrdinal("VehicleNumber")) ? null : reader.GetString("VehicleNumber"),
                 LogCount = reader.IsDBNull(reader.GetOrdinal("LogCount")) ? null : reader.GetInt32("LogCount"),
@@ -217,23 +252,33 @@ public class LogIntakeRepository : ILogIntakeRepository
         }
     }
 
-    public async Task<bool> UpdateThresholdAsync(string species, string grade, decimal threshold)
+    public async Task<bool> UpdateThresholdAsync(int stockId, decimal threshold)
     {
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
 
+        const string checkSql = "SELECT COUNT(*) FROM Stock WHERE StockId = @StockId;";
+        await using (var checkCmd = new MySqlCommand(checkSql, connection))
+        {
+            checkCmd.Parameters.AddWithValue("@StockId", stockId);
+            var count = Convert.ToInt32(await checkCmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                return false;
+            }
+        }
+
         const string sql = @"
-            UPDATE RawStock 
-            SET LowStockThreshold = @Threshold,
-                LastUpdated = UTC_TIMESTAMP()
-            WHERE Species = @Species AND Grade = @Grade;";
+            INSERT INTO StockThresholds (StockId, LowStockThreshold)
+            VALUES (@StockId, @Threshold)
+            ON DUPLICATE KEY UPDATE LowStockThreshold = @Threshold;";
 
         await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@StockId", stockId);
         cmd.Parameters.AddWithValue("@Threshold", threshold);
-        cmd.Parameters.AddWithValue("@Species", species);
-        cmd.Parameters.AddWithValue("@Grade", grade);
 
-        return await cmd.ExecuteNonQueryAsync() > 0;
+        await cmd.ExecuteNonQueryAsync();
+        return true;
     }
 
     public async Task<IEnumerable<Supplier>> GetActiveSuppliersAsync(bool includeInactive = false)
@@ -340,7 +385,7 @@ public class LogIntakeRepository : ILogIntakeRepository
         return lengths;
     }
 
-    public async Task<IEnumerable<LogItem>> GetLogsAsync(int? speciesId = null, string? species = null, int? lengthId = null, string? grade = null)
+    public async Task<IEnumerable<LogItem>> GetLogsAsync(int? speciesId = null, int? lengthId = null)
     {
         var logs = new List<LogItem>();
         await using var connection = new MySqlConnection(_connectionString);
@@ -350,40 +395,35 @@ public class LogIntakeRepository : ILogIntakeRepository
             SELECT 
                 lg.LogId,
                 lg.DeliveryId,
-                lg.SpeciesId,
+                lg.StockId,
+                st.SpeciesId,
                 s.Name AS SpeciesName,
-                lg.LengthId,
+                st.LengthId,
                 l.LengthFt,
-                lg.Grade,
                 lg.GirthFt,
                 lg.VolumeM3,
                 lg.Status,
+                sup.SupplierName,
                 lg.CreatedAt,
                 lg.RemovalReason,
                 lg.RemovedAt,
                 lg.RemovedBy
             FROM Logs lg
-            JOIN Species s ON lg.SpeciesId = s.SpeciesId
-            JOIN LogLengths l ON lg.LengthId = l.LengthId
+            JOIN Stock st ON lg.StockId = st.StockId
+            JOIN Species s ON st.SpeciesId = s.SpeciesId
+            JOIN LogLengths l ON st.LengthId = l.LengthId
+            JOIN Deliveries d ON lg.DeliveryId = d.DeliveryId
+            LEFT JOIN Suppliers sup ON d.SupplierId = sup.SupplierId
             WHERE lg.Status = 'InStock'";
 
         if (speciesId.HasValue)
         {
-            sql += " AND lg.SpeciesId = @SpeciesId";
-        }
-        else if (!string.IsNullOrWhiteSpace(species))
-        {
-            sql += " AND (s.Name = @Species OR CAST(s.SpeciesId AS CHAR) = @Species)";
+            sql += " AND st.SpeciesId = @SpeciesId";
         }
 
         if (lengthId.HasValue)
         {
-            sql += " AND lg.LengthId = @LengthId";
-        }
-
-        if (!string.IsNullOrWhiteSpace(grade))
-        {
-            sql += " AND lg.Grade = @Grade";
+            sql += " AND st.LengthId = @LengthId";
         }
 
         sql += " ORDER BY lg.LogId DESC;";
@@ -391,14 +431,9 @@ public class LogIntakeRepository : ILogIntakeRepository
         await using var cmd = new MySqlCommand(sql, connection);
         if (speciesId.HasValue)
             cmd.Parameters.AddWithValue("@SpeciesId", speciesId.Value);
-        else if (!string.IsNullOrWhiteSpace(species))
-            cmd.Parameters.AddWithValue("@Species", species.Trim());
 
         if (lengthId.HasValue)
             cmd.Parameters.AddWithValue("@LengthId", lengthId.Value);
-
-        if (!string.IsNullOrWhiteSpace(grade))
-            cmd.Parameters.AddWithValue("@Grade", grade.Trim().ToUpperInvariant());
 
         await using var reader = await cmd.ExecuteReaderAsync();
 
@@ -408,14 +443,15 @@ public class LogIntakeRepository : ILogIntakeRepository
             {
                 LogId = reader.GetInt32("LogId"),
                 DeliveryId = reader.GetInt32("DeliveryId"),
+                StockId = reader.GetInt32("StockId"),
                 SpeciesId = reader.GetInt32("SpeciesId"),
                 SpeciesName = reader.GetString("SpeciesName"),
                 LengthId = reader.GetInt32("LengthId"),
                 LengthFt = reader.GetDecimal("LengthFt"),
-                Grade = reader.GetString("Grade"),
                 GirthFt = reader.GetDecimal("GirthFt"),
                 VolumeM3 = reader.GetDecimal("VolumeM3"),
                 Status = reader.GetString("Status"),
+                SupplierName = reader.IsDBNull(reader.GetOrdinal("SupplierName")) ? null : reader.GetString("SupplierName"),
                 CreatedAt = reader.GetDateTime("CreatedAt"),
                 RemovalReason = reader.IsDBNull(reader.GetOrdinal("RemovalReason")) ? null : reader.GetString("RemovalReason"),
                 RemovedAt = reader.IsDBNull(reader.GetOrdinal("RemovedAt")) ? null : reader.GetDateTime("RemovedAt"),
@@ -444,5 +480,72 @@ public class LogIntakeRepository : ILogIntakeRepository
         cmd.Parameters.AddWithValue("@RemovedBy", removedBy);
 
         return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    /// <summary>
+    /// Marks all supplied LogIds as 'Consumed' in a single transaction.
+    /// Only logs with Status = 'InStock' are eligible.
+    /// Returns false (with rollback) if ANY requested log is not currently InStock,
+    /// ensuring an all-or-nothing guarantee — the caller (SawmillService) can then
+    /// roll back its own saw-job row and report a 409 to the end user.
+    /// </summary>
+    public async Task<bool> ConsumeLogsAsync(IEnumerable<int> logIds)
+    {
+        var idList = logIds.ToList();
+        if (idList.Count == 0) return false;
+
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            // 1. Count how many of the requested LogIds are currently InStock.
+            //    If the count doesn't match, at least one is ineligible → rollback.
+            var paramNames = idList.Select((_, i) => $"@lid{i}").ToArray();
+            var countSql = $@"
+                SELECT COUNT(*) FROM Logs
+                WHERE LogId IN ({string.Join(",", paramNames)})
+                  AND Status = 'InStock';";
+
+            int eligibleCount;
+            await using (var countCmd = new MySqlCommand(countSql, connection, (MySqlTransaction)transaction))
+            {
+                for (int i = 0; i < idList.Count; i++)
+                    countCmd.Parameters.AddWithValue(paramNames[i], idList[i]);
+
+                eligibleCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+            }
+
+            if (eligibleCount != idList.Count)
+            {
+                // At least one log is not InStock — roll back and signal failure.
+                await transaction.RollbackAsync();
+                return false;
+            }
+
+            // 2. All logs are InStock — update them to Consumed.
+            var updateSql = $@"
+                UPDATE Logs
+                SET Status = 'Consumed'
+                WHERE LogId IN ({string.Join(",", paramNames)})
+                  AND Status = 'InStock';";
+
+            await using (var updateCmd = new MySqlCommand(updateSql, connection, (MySqlTransaction)transaction))
+            {
+                for (int i = 0; i < idList.Count; i++)
+                    updateCmd.Parameters.AddWithValue(paramNames[i], idList[i]);
+
+                await updateCmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 }

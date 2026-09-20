@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { fetchWithAuth } from '../utils/api';
 import Layout from '../components/Layout';
 
 const API_BASE_URL = import.meta.env.VITE_LOG_INTAKE_API_URL || 'http://localhost:5201/api/LogIntake';
@@ -20,10 +21,12 @@ export default function LogIntakePage() {
   const [speciesList, setSpeciesList] = useState([]);
   const [logLengths, setLogLengths] = useState([]);
 
-  // Filter States for Log Inventory
+  // Expanded sub-rows for Log Inventory (set of logIds)
+  const [expandedLogIds, setExpandedLogIds] = useState(new Set());
+
+  // Filter States for Log Inventory (SpeciesId and LengthId only)
   const [selectedSpeciesFilter, setSelectedSpeciesFilter] = useState('');
   const [selectedLengthFilter, setSelectedLengthFilter] = useState('');
-  const [selectedGradeFilter, setSelectedGradeFilter] = useState('');
 
   // Loading & Alerts
   const [loading, setLoading] = useState(false);
@@ -33,13 +36,13 @@ export default function LogIntakePage() {
 
   // Record Delivery Form State:
   // Delivery-level: Supplier, VehicleNumber, Notes
-  // Dynamic rows: Species, Length, Grade, Girth (ft)
+  // Dynamic rows: Species, Length, Girth (ft) - No Grade
   const [deliveryForm, setDeliveryForm] = useState({
     supplierId: '',
     vehicleNumber: '',
     notes: '',
     logRows: [
-      { speciesId: '', lengthId: '', grade: 'A', girthFt: '' }
+      { speciesId: '', lengthId: '', girthFt: '' }
     ]
   });
 
@@ -73,10 +76,6 @@ export default function LogIntakePage() {
     reason: ''
   });
 
-  const authHeader = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${user?.token || sessionStorage.getItem('token')}`
-  };
 
   useEffect(() => {
     fetchStock();
@@ -84,7 +83,7 @@ export default function LogIntakePage() {
     fetchSuppliers();
     fetchSpecies();
     fetchLogLengths();
-    fetchLogs('', '', '');
+    fetchLogs('', '');
   }, []);
 
   const showNotification = (type, text) => {
@@ -92,17 +91,29 @@ export default function LogIntakePage() {
     setTimeout(() => setMessage({ type: '', text: '' }), 4000);
   };
 
+  const toggleExpandLog = (logId) => {
+    setExpandedLogIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(logId)) {
+        next.delete(logId);
+      } else {
+        next.add(logId);
+      }
+      return next;
+    });
+  };
+
   // 1. Fetch Raw Stock Summary
   const fetchStock = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/stock`, { headers: authHeader });
+      const res = await fetchWithAuth(`${API_BASE_URL}/stock`);
       if (res.ok) {
         const data = await res.json();
         setStocks(data);
       }
     } catch (err) {
-      console.error('Failed to fetch stock', err);
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch stock', err);
     } finally {
       setLoading(false);
     }
@@ -111,13 +122,13 @@ export default function LogIntakePage() {
   // 2. Fetch Deliveries
   const fetchDeliveries = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/deliveries`, { headers: authHeader });
+      const res = await fetchWithAuth(`${API_BASE_URL}/deliveries`);
       if (res.ok) {
         const data = await res.json();
         setDeliveries(data);
       }
     } catch (err) {
-      console.error('Failed to fetch deliveries', err);
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch deliveries', err);
     }
   };
 
@@ -126,8 +137,8 @@ export default function LogIntakePage() {
     setSuppliersLoading(true);
     try {
       const [activeRes, allRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/suppliers`, { headers: authHeader }),
-        fetch(`${API_BASE_URL}/suppliers?includeInactive=true`, { headers: authHeader })
+        fetchWithAuth(`${API_BASE_URL}/suppliers`),
+        fetchWithAuth(`${API_BASE_URL}/suppliers?includeInactive=true`)
       ]);
 
       if (activeRes.ok) {
@@ -139,7 +150,7 @@ export default function LogIntakePage() {
         setAllSuppliers(allData);
       }
     } catch (err) {
-      console.error('Failed to fetch suppliers', err);
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch suppliers', err);
     } finally {
       setSuppliersLoading(false);
     }
@@ -148,7 +159,7 @@ export default function LogIntakePage() {
   // 4. Fetch Species lookup
   const fetchSpecies = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/species`, { headers: authHeader });
+      const res = await fetchWithAuth(`${API_BASE_URL}/species`);
       if (res.ok) {
         const data = await res.json();
         setSpeciesList(data);
@@ -163,14 +174,14 @@ export default function LogIntakePage() {
         }
       }
     } catch (err) {
-      console.error('Failed to fetch species', err);
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch species', err);
     }
   };
 
   // 5. Fetch Log Lengths lookup
   const fetchLogLengths = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/log-lengths`, { headers: authHeader });
+      const res = await fetchWithAuth(`${API_BASE_URL}/log-lengths`);
       if (res.ok) {
         const data = await res.json();
         setLogLengths(data);
@@ -185,52 +196,48 @@ export default function LogIntakePage() {
         }
       }
     } catch (err) {
-      console.error('Failed to fetch log lengths', err);
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch log lengths', err);
     }
   };
 
-  // 6. Fetch Individual Logs (with optional species, length, grade filters)
+  // 6. Fetch Individual Logs (with optional speciesId and lengthId filters)
   const fetchLogs = async (
-    species = selectedSpeciesFilter,
-    length = selectedLengthFilter,
-    grade = selectedGradeFilter
+    speciesId = selectedSpeciesFilter,
+    lengthId = selectedLengthFilter
   ) => {
     setLogsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (species) params.append('species', species);
-      if (length) params.append('lengthId', length);
-      if (grade) params.append('grade', grade);
+      if (speciesId) params.append('speciesId', speciesId);
+      if (lengthId) params.append('lengthId', lengthId);
 
       const qs = params.toString() ? `?${params.toString()}` : '';
-      const res = await fetch(`${API_BASE_URL}/logs${qs}`, { headers: authHeader });
+      const res = await fetchWithAuth(`${API_BASE_URL}/logs${qs}`);
       if (res.ok) {
         const data = await res.json();
         setLogs(data);
       }
     } catch (err) {
-      console.error('Failed to fetch logs', err);
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch logs', err);
     } finally {
       setLogsLoading(false);
     }
   };
 
   // Filter change handlers for Log Inventory
-  const handleFilterChange = (species, length, grade) => {
-    setSelectedSpeciesFilter(species);
-    setSelectedLengthFilter(length);
-    setSelectedGradeFilter(grade);
-    fetchLogs(species, length, grade);
+  const handleFilterChange = (speciesId, lengthId) => {
+    setSelectedSpeciesFilter(speciesId);
+    setSelectedLengthFilter(lengthId);
+    fetchLogs(speciesId, lengthId);
   };
 
   const clearFilters = () => {
     setSelectedSpeciesFilter('');
     setSelectedLengthFilter('');
-    setSelectedGradeFilter('');
-    fetchLogs('', '', '');
+    fetchLogs('', '');
   };
 
-  // Dynamic Log Rows Handlers (Each row has its own Species, Length, Grade, Girth)
+  // Dynamic Log Rows Handlers (Each row has its own Species, Length, Girth)
   const addLogRow = () => {
     setDeliveryForm((prev) => ({
       ...prev,
@@ -239,7 +246,6 @@ export default function LogIntakePage() {
         {
           speciesId: speciesList[0]?.speciesId || '',
           lengthId: logLengths[0]?.lengthId || '',
-          grade: 'A',
           girthFt: ''
         }
       ]
@@ -282,10 +288,6 @@ export default function LogIntakePage() {
         showNotification('error', `Log #${i + 1}: Please select a standard length.`);
         return;
       }
-      if (!row.grade || !row.grade.trim()) {
-        showNotification('error', `Log #${i + 1}: Please enter a grade.`);
-        return;
-      }
       const g = parseFloat(row.girthFt);
       if (isNaN(g) || g <= 0) {
         showNotification('error', `Log #${i + 1}: Please provide a valid positive girth.`);
@@ -302,15 +304,13 @@ export default function LogIntakePage() {
       logs: deliveryForm.logRows.map((row) => ({
         speciesId: parseInt(row.speciesId),
         lengthId: parseInt(row.lengthId),
-        grade: row.grade.trim().toUpperCase(),
         girthFt: parseFloat(row.girthFt)
       }))
     };
 
     try {
-      const res = await fetch(`${API_BASE_URL}/deliveries`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/deliveries`, {
         method: 'POST',
-        headers: authHeader,
         body: JSON.stringify(payload)
       });
 
@@ -324,7 +324,6 @@ export default function LogIntakePage() {
             {
               speciesId: speciesList[0]?.speciesId || '',
               lengthId: logLengths[0]?.lengthId || '',
-              grade: 'A',
               girthFt: ''
             }
           ]
@@ -338,7 +337,7 @@ export default function LogIntakePage() {
         showNotification('error', errData?.message || 'Failed to record delivery. Ensure all fields are valid.');
       }
     } catch (err) {
-      showNotification('error', 'Network error connecting to LogIntakeService.');
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error connecting to LogIntakeService.');
     }
   };
 
@@ -351,9 +350,8 @@ export default function LogIntakePage() {
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/logs/${removeLogModal.logId}/remove`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/logs/${removeLogModal.logId}/remove`, {
         method: 'PUT',
-        headers: authHeader,
         body: JSON.stringify({ reason: removeLogModal.reason.trim() })
       });
 
@@ -367,7 +365,7 @@ export default function LogIntakePage() {
         showNotification('error', errData?.message || 'Failed to remove log.');
       }
     } catch (err) {
-      showNotification('error', 'Network error while removing log.');
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error while removing log.');
     }
   };
 
@@ -380,9 +378,8 @@ export default function LogIntakePage() {
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/suppliers`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/suppliers`, {
         method: 'POST',
-        headers: authHeader,
         body: JSON.stringify({
           name: supplierForm.name.trim(),
           phoneNumber: supplierForm.phoneNumber.trim(),
@@ -399,16 +396,15 @@ export default function LogIntakePage() {
         showNotification('error', errData?.message || 'Failed to create supplier.');
       }
     } catch (err) {
-      showNotification('error', 'Network error creating supplier.');
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error creating supplier.');
     }
   };
 
   // 10. Admin-Only Deactivate Supplier
   const handleDeactivateSupplierConfirm = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/suppliers/${deactivateSupplierModal.supplierId}/deactivate`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/suppliers/${deactivateSupplierModal.supplierId}/deactivate`, {
         method: 'PUT',
-        headers: authHeader
       });
 
       if (res.ok) {
@@ -420,7 +416,7 @@ export default function LogIntakePage() {
         showNotification('error', errData?.message || 'Failed to deactivate supplier.');
       }
     } catch (err) {
-      showNotification('error', 'Network error deactivating supplier.');
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error deactivating supplier.');
     }
   };
 
@@ -428,9 +424,8 @@ export default function LogIntakePage() {
   const handleAdjustSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API_BASE_URL}/stock/adjust`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/stock/adjust`, {
         method: 'POST',
-        headers: authHeader,
         body: JSON.stringify({
           species: adjustModal.species,
           grade: adjustModal.grade,
@@ -448,7 +443,7 @@ export default function LogIntakePage() {
         showNotification('error', 'Failed to adjust stock. Check permissions.');
       }
     } catch (err) {
-      showNotification('error', 'Network error adjusting stock.');
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error adjusting stock.');
     }
   };
 
@@ -521,67 +516,69 @@ export default function LogIntakePage() {
           </button>
         </div>
 
-        {/* TAB 1: Raw Stock Overview (Grouped by Species, Length, Grade) */}
+        {/* TAB 1: Raw Stock Overview */}
         {activeTab === 'stock' && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <div>
-                <h2 className="font-semibold text-gray-800">Current Stock by Species, Length &amp; Grade</h2>
+                <h2 className="font-semibold text-gray-800">Current Stock by Species &amp; Length</h2>
                 <p className="text-xs text-gray-500">Live rollup dynamically derived from all in-stock logs</p>
               </div>
               <button onClick={fetchStock} className="text-xs bg-white border border-gray-300 px-3 py-1.5 rounded-md hover:bg-gray-50">
                 Refresh
               </button>
             </div>
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-600 border-b">
-                <tr>
-                  <th className="py-3 px-4">Species</th>
-                  <th className="py-3 px-4">Length (ft)</th>
-                  <th className="py-3 px-4">Grade</th>
-                  <th className="py-3 px-4">Log Count</th>
-                  <th className="py-3 px-4">Total Volume (m³)</th>
-                  <th className="py-3 px-4">Status &amp; Alert</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {stocks.length === 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gray-50 text-gray-600 border-b">
                   <tr>
-                    <td colSpan="6" className="py-6 text-center text-gray-400">
-                      {loading ? 'Loading stock...' : 'No in-stock logs available.'}
-                    </td>
+                    <th className="py-3 px-4">Stock</th>
+                    <th className="py-3 px-4">Species</th>
+                    <th className="py-3 px-4">Length (ft)</th>
+                    <th className="py-3 px-4">Log Count</th>
+                    <th className="py-3 px-4">Total Volume (m³)</th>
+                    <th className="py-3 px-4">Status &amp; Alert</th>
                   </tr>
-                ) : (
-                  stocks.map((item, idx) => {
-                    const isLow = item.isLowStock;
-                    return (
-                      <tr key={`${item.speciesId}-${item.lengthId}-${item.grade}-${idx}`} className="hover:bg-gray-50">
-                        <td className="py-3 px-4 font-semibold text-gray-800">{item.species}</td>
-                        <td className="py-3 px-4 text-gray-600">{item.lengthFt} ft</td>
-                        <td className="py-3 px-4 text-gray-600">{item.grade}</td>
-                        <td className="py-3 px-4 font-semibold text-gray-700">{item.logCount}</td>
-                        <td className="py-3 px-4 font-bold">{Number(item.totalVolumeM3).toFixed(4)} m³</td>
-                        <td className="py-3 px-4">
-                          {isLow ? (
-                            <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-rose-100 text-rose-700 border border-rose-200">
-                              ⚠️ Low Stock (≤ {item.lowStockThreshold} m³)
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">
-                              Adequate Stock
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {stocks.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="py-6 text-center text-gray-400">
+                        {loading ? 'Loading stock...' : 'No in-stock logs available.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    stocks.map((item, idx) => {
+                      const isLow = item.isLowStock;
+                      return (
+                        <tr key={item.stockId || `${item.speciesId}-${item.lengthId}-${idx}`} className="hover:bg-gray-50">
+                          <td className="py-3 px-4 font-mono text-xs font-bold text-gray-700">STK-{item.stockId}</td>
+                          <td className="py-3 px-4 font-semibold text-gray-800">{item.species}</td>
+                          <td className="py-3 px-4 text-gray-600">{item.lengthFt} ft</td>
+                          <td className="py-3 px-4 font-semibold text-gray-700">{item.logCount}</td>
+                          <td className="py-3 px-4 font-bold">{Number(item.totalVolumeM3).toFixed(4)} m³</td>
+                          <td className="py-3 px-4">
+                            {isLow ? (
+                              <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                                ⚠️ Low Stock (≤ {item.lowStockThreshold} m³)
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">
+                                Adequate Stock
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
-        {/* TAB 2: Log Inventory (Individual Logs with Species, Length, Grade Filters & Admin Soft-Delete) */}
+        {/* TAB 2: Log Inventory (Individual Logs with Species & Length Filters, Expandable Delivery/Supplier Row & Admin Soft-Delete) */}
         {activeTab === 'logs' && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden space-y-4">
             <div className="p-4 border-b border-gray-100 flex flex-wrap justify-between items-center gap-4 bg-gray-50">
@@ -592,17 +589,17 @@ export default function LogIntakePage() {
                 </span>
               </div>
 
-              {/* Combinable Filters: Species, Length, Grade */}
+              {/* Combinable Filters: SpeciesId, LengthId */}
               <div className="flex flex-wrap items-center gap-2">
                 {/* Species filter */}
                 <select
                   value={selectedSpeciesFilter}
-                  onChange={(e) => handleFilterChange(e.target.value, selectedLengthFilter, selectedGradeFilter)}
+                  onChange={(e) => handleFilterChange(e.target.value, selectedLengthFilter)}
                   className="px-2.5 py-1.5 border border-gray-300 rounded-md text-xs bg-white focus:ring-1 focus:ring-amber-500"
                 >
                   <option value="">All Species</option>
                   {speciesList.map((s) => (
-                    <option key={s.speciesId} value={s.name}>
+                    <option key={s.speciesId} value={s.speciesId}>
                       {s.name}
                     </option>
                   ))}
@@ -611,7 +608,7 @@ export default function LogIntakePage() {
                 {/* Length filter */}
                 <select
                   value={selectedLengthFilter}
-                  onChange={(e) => handleFilterChange(selectedSpeciesFilter, e.target.value, selectedGradeFilter)}
+                  onChange={(e) => handleFilterChange(selectedSpeciesFilter, e.target.value)}
                   className="px-2.5 py-1.5 border border-gray-300 rounded-md text-xs bg-white focus:ring-1 focus:ring-amber-500"
                 >
                   <option value="">All Lengths</option>
@@ -622,19 +619,7 @@ export default function LogIntakePage() {
                   ))}
                 </select>
 
-                {/* Grade filter */}
-                <select
-                  value={selectedGradeFilter}
-                  onChange={(e) => handleFilterChange(selectedSpeciesFilter, selectedLengthFilter, e.target.value)}
-                  className="px-2.5 py-1.5 border border-gray-300 rounded-md text-xs bg-white focus:ring-1 focus:ring-amber-500"
-                >
-                  <option value="">All Grades</option>
-                  <option value="A">Grade A</option>
-                  <option value="B">Grade B</option>
-                  <option value="C">Grade C</option>
-                </select>
-
-                {(selectedSpeciesFilter || selectedLengthFilter || selectedGradeFilter) && (
+                {(selectedSpeciesFilter || selectedLengthFilter) && (
                   <button
                     onClick={clearFilters}
                     className="text-xs text-amber-700 hover:text-amber-900 font-medium px-2 py-1"
@@ -652,49 +637,81 @@ export default function LogIntakePage() {
               </div>
             </div>
 
+            {/* Horizontally scrolling container with bumped font size */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full text-left text-base">
                 <thead className="bg-gray-50 text-gray-600 border-b">
                   <tr>
+                    <th className="py-3 px-4 w-10"></th>
                     <th className="py-3 px-4">Log ID</th>
                     <th className="py-3 px-4">Species</th>
                     <th className="py-3 px-4">Length (ft)</th>
                     <th className="py-3 px-4">Girth (ft)</th>
                     <th className="py-3 px-4">Volume (m³)</th>
-                    <th className="py-3 px-4">Grade</th>
-                    <th className="py-3 px-4">Delivery #</th>
                     {isAdmin && <th className="py-3 px-4 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {logs.length === 0 ? (
                     <tr>
-                      <td colSpan={isAdmin ? 8 : 7} className="py-6 text-center text-gray-400">
+                      <td colSpan={isAdmin ? 7 : 6} className="py-6 text-center text-gray-400">
                         {logsLoading ? 'Loading logs...' : 'No in-stock logs match the selected criteria.'}
                       </td>
                     </tr>
                   ) : (
-                    logs.map((lg) => (
-                      <tr key={lg.logId} className="hover:bg-gray-50">
-                        <td className="py-3 px-4 font-mono text-xs font-bold text-gray-700">#{lg.logId}</td>
-                        <td className="py-3 px-4 font-semibold text-gray-800">{lg.speciesName}</td>
-                        <td className="py-3 px-4 text-gray-600">{lg.lengthFt} ft</td>
-                        <td className="py-3 px-4 text-gray-600">{lg.girthFt} ft</td>
-                        <td className="py-3 px-4 font-bold text-gray-800">{Number(lg.volumeM3).toFixed(4)} m³</td>
-                        <td className="py-3 px-4 text-gray-600">{lg.grade}</td>
-                        <td className="py-3 px-4 text-gray-500 font-mono text-xs">#{lg.deliveryId}</td>
-                        {isAdmin && (
-                          <td className="py-3 px-4 text-right">
-                            <button
-                              onClick={() => setRemoveLogModal({ isOpen: true, logId: lg.logId, reason: '' })}
-                              className="text-xs px-2.5 py-1 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded font-medium transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))
+                    logs.map((lg) => {
+                      const isExpanded = expandedLogIds.has(lg.logId);
+                      return (
+                        <React.Fragment key={lg.logId}>
+                          <tr className="hover:bg-gray-50 transition-colors">
+                            <td className="py-3 px-4 w-10 text-center">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandLog(lg.logId)}
+                                className="text-gray-400 hover:text-gray-700 p-1 rounded transition-transform duration-150 inline-flex items-center justify-center"
+                                title={isExpanded ? 'Collapse details' : 'Expand details'}
+                              >
+                                <svg
+                                  className={`w-4 h-4 transform transition-transform ${isExpanded ? 'rotate-90 text-amber-700' : ''}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                                </svg>
+                              </button>
+                            </td>
+                            <td className="py-3 px-4 font-mono font-bold text-gray-700">LOG-{lg.logId}</td>
+                            <td className="py-3 px-4 font-semibold text-gray-800">{lg.speciesName}</td>
+                            <td className="py-3 px-4 text-gray-600">{lg.lengthFt} ft</td>
+                            <td className="py-3 px-4 text-gray-600">{lg.girthFt} ft</td>
+                            <td className="py-3 px-4 font-bold text-gray-800">{Number(lg.volumeM3).toFixed(4)} m³</td>
+                            {isAdmin && (
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  onClick={() => setRemoveLogModal({ isOpen: true, logId: lg.logId, reason: '' })}
+                                  className="text-xs px-2.5 py-1 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded font-medium transition-colors"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                          {isExpanded && (
+                            <tr className="bg-amber-50/50 border-b border-gray-100">
+                              <td></td>
+                              <td colSpan={isAdmin ? 6 : 5} className="py-2.5 px-4 text-sm text-gray-600">
+                                <span className="inline-flex items-center gap-2">
+                                  <span className="font-semibold text-gray-700">Delivery #{lg.deliveryId}</span>
+                                  <span>·</span>
+                                  <span className="text-gray-800">{lg.supplierName || 'Unknown Supplier'}</span>
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -702,7 +719,7 @@ export default function LogIntakePage() {
           </div>
         )}
 
-        {/* TAB 3: Record Delivery Form (Fully Independent Rows per Physical Log) */}
+        {/* TAB 3: Record Delivery Form (No Grade Input) */}
         {activeTab === 'intake' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 max-w-4xl">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Record New Timber Delivery</h2>
@@ -752,13 +769,13 @@ export default function LogIntakePage() {
                 </div>
               </div>
 
-              {/* Physical Log Entries: Each row has independent Species, Length, Grade, Girth */}
+              {/* Physical Log Entries: Each row has independent Species, Length, Girth */}
               <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/50 space-y-3">
                 <div className="flex justify-between items-center">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-800">Physical Log Entries</h3>
                     <p className="text-xs text-gray-500">
-                      Configure species, length, grade, and girth individually for each physical log in this delivery. Total logs: <span className="font-bold text-amber-700">{deliveryForm.logRows.length}</span>
+                      Configure species, length, and girth individually for each physical log in this delivery. Total logs: <span className="font-bold text-amber-700">{deliveryForm.logRows.length}</span>
                     </p>
                   </div>
                   <button
@@ -776,7 +793,7 @@ export default function LogIntakePage() {
                       <span className="text-xs font-bold text-gray-500 w-14">Log #{idx + 1}</span>
 
                       {/* Species Dropdown */}
-                      <div className="flex-1 min-w-[130px]">
+                      <div className="flex-1 min-w-[140px]">
                         <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Species *</label>
                         <select
                           required
@@ -794,7 +811,7 @@ export default function LogIntakePage() {
                       </div>
 
                       {/* Length Dropdown */}
-                      <div className="w-28">
+                      <div className="w-32">
                         <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Length (ft) *</label>
                         <select
                           required
@@ -811,22 +828,8 @@ export default function LogIntakePage() {
                         </select>
                       </div>
 
-                      {/* Grade Input */}
-                      <div className="w-24">
-                        <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Grade *</label>
-                        <input
-                          type="text"
-                          required
-                          maxLength={10}
-                          placeholder="e.g. A"
-                          value={row.grade}
-                          onChange={(e) => updateLogRowField(idx, 'grade', e.target.value)}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-1 focus:ring-amber-500"
-                        />
-                      </div>
-
                       {/* Girth Input */}
-                      <div className="w-28">
+                      <div className="w-32">
                         <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Girth (ft) *</label>
                         <input
                           type="number"
@@ -880,38 +883,40 @@ export default function LogIntakePage() {
                 Refresh
               </button>
             </div>
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-600 border-b">
-                <tr>
-                  <th className="py-3 px-4">Delivery #</th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Supplier</th>
-                  <th className="py-3 px-4">Log Count</th>
-                  <th className="py-3 px-4">Vehicle #</th>
-                  <th className="py-3 px-4">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {deliveries.length === 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gray-50 text-gray-600 border-b">
                   <tr>
-                    <td colSpan="6" className="py-6 text-center text-gray-400">No delivery records found.</td>
+                    <th className="py-3 px-4">Delivery #</th>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4">Supplier</th>
+                    <th className="py-3 px-4">Log Count</th>
+                    <th className="py-3 px-4">Vehicle #</th>
+                    <th className="py-3 px-4">Notes</th>
                   </tr>
-                ) : (
-                  deliveries.map((del) => (
-                    <tr key={del.deliveryId} className="hover:bg-gray-50">
-                      <td className="py-3 px-4 font-mono text-xs font-bold text-gray-700">#{del.deliveryId}</td>
-                      <td className="py-3 px-4 text-gray-500">{new Date(del.receivedAt).toLocaleDateString()}</td>
-                      <td className="py-3 px-4 font-medium text-gray-800">
-                        {del.supplierName || `Supplier #${del.supplierId}`}
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-gray-700">{del.logCount ?? '—'}</td>
-                      <td className="py-3 px-4 text-gray-500">{del.vehicleNumber || 'N/A'}</td>
-                      <td className="py-3 px-4 text-gray-500 text-xs truncate max-w-xs">{del.notes || '—'}</td>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {deliveries.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="py-6 text-center text-gray-400">No delivery records found.</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    deliveries.map((del) => (
+                      <tr key={del.deliveryId} className="hover:bg-gray-50">
+                        <td className="py-3 px-4 font-mono text-xs font-bold text-gray-700">#{del.deliveryId}</td>
+                        <td className="py-3 px-4 text-gray-500">{new Date(del.receivedAt).toLocaleDateString()}</td>
+                        <td className="py-3 px-4 font-medium text-gray-800">
+                          {del.supplierName || `Supplier #${del.supplierId}`}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-gray-700">{del.logCount ?? '—'}</td>
+                        <td className="py-3 px-4 text-gray-500">{del.vehicleNumber || 'N/A'}</td>
+                        <td className="py-3 px-4 text-gray-500 text-xs truncate max-w-xs">{del.notes || '—'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -979,65 +984,67 @@ export default function LogIntakePage() {
                   Refresh
                 </button>
               </div>
-              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 text-gray-600 border-b">
-                  <tr>
-                    <th className="py-3 px-4">Supplier ID</th>
-                    <th className="py-3 px-4">Name</th>
-                    <th className="py-3 px-4">Phone Number</th>
-                    <th className="py-3 px-4">Address</th>
-                    <th className="py-3 px-4">Status</th>
-                    {isAdmin && <th className="py-3 px-4 text-right">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {allSuppliers.length === 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-gray-600 border-b">
                     <tr>
-                      <td colSpan={isAdmin ? 6 : 5} className="py-6 text-center text-gray-400">
-                        {suppliersLoading ? 'Loading suppliers...' : 'No suppliers registered.'}
-                      </td>
+                      <th className="py-3 px-4">Supplier ID</th>
+                      <th className="py-3 px-4">Name</th>
+                      <th className="py-3 px-4">Phone Number</th>
+                      <th className="py-3 px-4">Address</th>
+                      <th className="py-3 px-4">Status</th>
+                      {isAdmin && <th className="py-3 px-4 text-right">Actions</th>}
                     </tr>
-                  ) : (
-                    allSuppliers.map((s) => (
-                      <tr key={s.supplierId} className="hover:bg-gray-50">
-                        <td className="py-3 px-4 font-mono text-xs text-gray-500">#{s.supplierId}</td>
-                        <td className="py-3 px-4 font-semibold text-gray-800">{s.supplierName}</td>
-                        <td className="py-3 px-4 text-gray-600">{s.contactNumber || '—'}</td>
-                        <td className="py-3 px-4 text-gray-600">{s.address || '—'}</td>
-                        <td className="py-3 px-4">
-                          {s.isActive ? (
-                            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                              Active
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 border border-gray-200">
-                              Deactivated
-                            </span>
-                          )}
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {allSuppliers.length === 0 ? (
+                      <tr>
+                        <td colSpan={isAdmin ? 6 : 5} className="py-6 text-center text-gray-400">
+                          {suppliersLoading ? 'Loading suppliers...' : 'No suppliers registered.'}
                         </td>
-                        {isAdmin && (
-                          <td className="py-3 px-4 text-right">
+                      </tr>
+                    ) : (
+                      allSuppliers.map((s) => (
+                        <tr key={s.supplierId} className="hover:bg-gray-50">
+                          <td className="py-3 px-4 font-mono text-xs text-gray-500">#{s.supplierId}</td>
+                          <td className="py-3 px-4 font-semibold text-gray-800">{s.supplierName}</td>
+                          <td className="py-3 px-4 text-gray-600">{s.contactNumber || '—'}</td>
+                          <td className="py-3 px-4 text-gray-600">{s.address || '—'}</td>
+                          <td className="py-3 px-4">
                             {s.isActive ? (
-                              <button
-                                onClick={() => setDeactivateSupplierModal({
-                                  isOpen: true,
-                                  supplierId: s.supplierId,
-                                  supplierName: s.supplierName
-                                })}
-                                className="text-xs px-2.5 py-1 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded font-medium transition-colors"
-                              >
-                                Deactivate
-                              </button>
+                              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Active
+                              </span>
                             ) : (
-                              <span className="text-xs text-gray-400 italic">Inactive</span>
+                              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                                Deactivated
+                              </span>
                             )}
                           </td>
-                        )}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                          {isAdmin && (
+                            <td className="py-3 px-4 text-right">
+                              {s.isActive ? (
+                                <button
+                                  onClick={() => setDeactivateSupplierModal({
+                                    isOpen: true,
+                                    supplierId: s.supplierId,
+                                    supplierName: s.supplierName
+                                  })}
+                                  className="text-xs px-2.5 py-1 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded font-medium transition-colors"
+                                >
+                                  Deactivate
+                                </button>
+                              ) : (
+                                <span className="text-xs text-gray-400 italic">Inactive</span>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

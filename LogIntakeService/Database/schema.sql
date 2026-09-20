@@ -29,23 +29,30 @@ CREATE TABLE IF NOT EXISTS Deliveries (
     DeliveryId INT AUTO_INCREMENT PRIMARY KEY,
     SupplierId INT NOT NULL,
     Species VARCHAR(50) NULL,
-    Grade VARCHAR(10) NULL,
     VolumeM3 DECIMAL(10,2) NULL,
     VehicleNumber VARCHAR(20) NULL,
-    LogCount INT NULL,
-    Notes VARCHAR(500) NULL,
     ReceivedBy INT NOT NULL,
     ReceivedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    LogCount INT NULL,
+    Notes VARCHAR(500) NULL,
     CONSTRAINT fk_deliveries_supplier FOREIGN KEY (SupplierId) REFERENCES Suppliers(SupplierId)
 );
 
--- 5. Logs Table (Per individual log)
+-- 5. Stock Table (Species + Length combination defines stock batch)
+CREATE TABLE IF NOT EXISTS Stock (
+    StockId INT AUTO_INCREMENT PRIMARY KEY,
+    SpeciesId INT NOT NULL,
+    LengthId INT NOT NULL,
+    UNIQUE KEY uq_stock_species_length (SpeciesId, LengthId),
+    CONSTRAINT fk_stock_species FOREIGN KEY (SpeciesId) REFERENCES Species(SpeciesId),
+    CONSTRAINT fk_stock_length FOREIGN KEY (LengthId) REFERENCES LogLengths(LengthId)
+);
+
+-- 6. Logs Table (Per individual log)
 CREATE TABLE IF NOT EXISTS Logs (
     LogId INT AUTO_INCREMENT PRIMARY KEY,
     DeliveryId INT NOT NULL,
-    SpeciesId INT NOT NULL,
-    LengthId INT NOT NULL,
-    Grade VARCHAR(10) NOT NULL,
+    StockId INT NOT NULL,
     GirthFt DECIMAL(6,2) NOT NULL,
     VolumeM3 DECIMAL(10,4) NOT NULL,
     Status ENUM('InStock','Consumed','Removed') NOT NULL DEFAULT 'InStock',
@@ -54,22 +61,17 @@ CREATE TABLE IF NOT EXISTS Logs (
     RemovedAt DATETIME NULL,
     RemovedBy INT NULL,
     CONSTRAINT fk_logs_delivery FOREIGN KEY (DeliveryId) REFERENCES Deliveries(DeliveryId),
-    CONSTRAINT fk_logs_species FOREIGN KEY (SpeciesId) REFERENCES Species(SpeciesId),
-    CONSTRAINT fk_logs_length FOREIGN KEY (LengthId) REFERENCES LogLengths(LengthId)
+    CONSTRAINT fk_logs_stock FOREIGN KEY (StockId) REFERENCES Stock(StockId)
 );
 
--- 6. Stock Thresholds Table (Configurable threshold per species, length, grade)
+-- 7. Stock Thresholds Table (Configurable threshold per stock item)
 CREATE TABLE IF NOT EXISTS StockThresholds (
-    SpeciesId INT NOT NULL,
-    LengthId INT NOT NULL,
-    Grade VARCHAR(10) NOT NULL,
+    StockId INT NOT NULL PRIMARY KEY,
     LowStockThreshold DECIMAL(10,2) NOT NULL DEFAULT 10.00,
-    PRIMARY KEY (SpeciesId, LengthId, Grade),
-    CONSTRAINT fk_threshold_species FOREIGN KEY (SpeciesId) REFERENCES Species(SpeciesId),
-    CONSTRAINT fk_threshold_length FOREIGN KEY (LengthId) REFERENCES LogLengths(LengthId)
+    CONSTRAINT fk_threshold_stock FOREIGN KEY (StockId) REFERENCES Stock(StockId)
 );
 
--- 7. [DEPRECATED] Raw Stock Table (Kept for backwards compatibility, do not drop)
+-- 8. [DEPRECATED] Raw Stock Table (Kept for backwards compatibility, do not drop)
 CREATE TABLE IF NOT EXISTS RawStock (
     StockId INT AUTO_INCREMENT PRIMARY KEY,
     Species VARCHAR(50) NOT NULL,
@@ -80,7 +82,7 @@ CREATE TABLE IF NOT EXISTS RawStock (
     CONSTRAINT uq_species_grade UNIQUE (Species, Grade)
 );
 
--- 8. [DEPRECATED] Stock Adjustments Table (Kept for backwards compatibility)
+-- 9. [DEPRECATED] Stock Adjustments Table (Kept for backwards compatibility)
 CREATE TABLE IF NOT EXISTS StockAdjustments (
     AdjustmentId INT AUTO_INCREMENT PRIMARY KEY,
     Species VARCHAR(50) NOT NULL,

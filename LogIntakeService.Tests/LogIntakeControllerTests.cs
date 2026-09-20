@@ -31,7 +31,7 @@ public class LogIntakeControllerTests
             Notes = "Standard single-log delivery",
             Logs = new List<DeliveryLogEntryDto>
             {
-                new() { SpeciesId = 1, LengthId = 1, Grade = "A", GirthFt = 4.5m }
+                new() { SpeciesId = 1, LengthId = 1, GirthFt = 4.5m }
             }
         };
 
@@ -50,9 +50,9 @@ public class LogIntakeControllerTests
     {
         var logs = new List<DeliveryLogEntryDto>
         {
-            new() { SpeciesId = 1, LengthId = 1, Grade = "A", GirthFt = 3.5m },
-            new() { SpeciesId = 2, LengthId = 3, Grade = "B", GirthFt = 4.2m },
-            new() { SpeciesId = 3, LengthId = 2, Grade = "A", GirthFt = 5.0m }
+            new() { SpeciesId = 1, LengthId = 1, GirthFt = 3.5m },
+            new() { SpeciesId = 2, LengthId = 3, GirthFt = 4.2m },
+            new() { SpeciesId = 3, LengthId = 2, GirthFt = 5.0m }
         };
 
         var dto = new CreateDeliveryDto
@@ -90,22 +90,22 @@ public class LogIntakeControllerTests
         {
             new()
             {
+                StockId = 1,
                 SpeciesId = 1,
                 Species = "Teak",
                 LengthId = 1,
                 LengthFt = 10.00m,
-                Grade = "A",
                 LogCount = 5,
                 TotalVolumeM3 = 30.00m,
                 LowStockThreshold = 10.00m
             },
             new()
             {
+                StockId = 2,
                 SpeciesId = 2,
                 Species = "Mahogany",
                 LengthId = 2,
                 LengthFt = 12.00m,
-                Grade = "B",
                 LogCount = 2,
                 TotalVolumeM3 = 5.00m,
                 LowStockThreshold = 12.00m

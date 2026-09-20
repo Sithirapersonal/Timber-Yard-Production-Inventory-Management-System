@@ -66,11 +66,9 @@ public class LogIntakeController : ControllerBase
     [HttpGet("logs")]
     public async Task<IActionResult> GetLogs(
         [FromQuery] int? speciesId,
-        [FromQuery] string? species,
-        [FromQuery] int? lengthId,
-        [FromQuery] string? grade)
+        [FromQuery] int? lengthId)
     {
-        var logs = await _repository.GetLogsAsync(speciesId, species, lengthId, grade);
+        var logs = await _repository.GetLogsAsync(speciesId, lengthId);
         return Ok(logs);
     }
 
@@ -93,6 +91,33 @@ public class LogIntakeController : ControllerBase
         }
 
         return Ok(new { message = "Log removed from inventory successfully." });
+    }
+
+    /// <summary>
+    /// Marks a batch of logs as Consumed in a single all-or-nothing transaction.
+    /// Called by SawmillService immediately after recording a saw job.
+    /// Returns 400 if any of the requested logs is not currently InStock.
+    /// </summary>
+    [HttpPut("logs/consume")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> ConsumeLogs([FromBody] ConsumeLogsDto dto)
+    {
+        if (dto.LogIds is null || dto.LogIds.Count == 0)
+        {
+            return BadRequest(new { message = "LogIds must be a non-empty list." });
+        }
+
+        var consumed = await _repository.ConsumeLogsAsync(dto.LogIds);
+        if (!consumed)
+        {
+            return BadRequest(new
+            {
+                message = "One or more of the requested logs could not be marked Consumed. " +
+                          "They may already be Consumed or Removed. No changes were made."
+            });
+        }
+
+        return Ok(new { message = $"{dto.LogIds.Count} log(s) marked as Consumed successfully." });
     }
 
     [HttpPost("stock/adjust")]
@@ -122,8 +147,7 @@ public class LogIntakeController : ControllerBase
     public async Task<IActionResult> UpdateThreshold([FromBody] UpdateThresholdDto dto)
     {
         var updated = await _repository.UpdateThresholdAsync(
-            dto.Species.Trim(),
-            dto.Grade.Trim().ToUpperInvariant(),
+            dto.StockId,
             dto.LowStockThreshold
         );
 
