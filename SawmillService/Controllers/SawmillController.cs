@@ -92,6 +92,18 @@ public class SawmillController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // GET api/Sawmill/machines
+    // All machines with optional ?q= search (Name or MachineCode). Includes
+    // non-Available machines so the frontend can show/disable them by status.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpGet("machines")]
+    public async Task<IActionResult> GetMachines([FromQuery] string? q = null)
+    {
+        var machines = await _repository.GetMachinesAsync(q);
+        return Ok(machines);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // POST api/Sawmill/jobs
     // Starts a saw job: validates, computes volume, writes DB, marks logs Consumed.
     // If the LogIntakeService consume call fails, the local insert is rolled back.
@@ -109,6 +121,9 @@ public class SawmillController : ControllerBase
 
         if (dto.WorkerIds is null || dto.WorkerIds.Count == 0)
             return BadRequest(new { message = "At least one worker must be assigned." });
+
+        if (dto.MachineId <= 0)
+            return BadRequest(new { message = "A machine must be allocated to this saw job." });
 
         var userIdClaim = User.FindFirst("userId")?.Value;
         var startedBy = int.TryParse(userIdClaim, out var uid) ? uid : 0;
@@ -160,6 +175,13 @@ public class SawmillController : ControllerBase
             });
         }
 
+        // ── Validate machine in SawmillDB ──────────────────────────────────
+        var machine = await _repository.GetMachineByIdAsync(dto.MachineId);
+        if (machine is null)
+            return BadRequest(new { message = $"Machine {dto.MachineId} does not exist." });
+        if (machine.Status != "Available")
+            return BadRequest(new { message = $"Machine {machine.MachineCode} ({machine.Name}) is not Available (current status: {machine.Status})." });
+
         // ── Compute TotalVolumeM3 server-side ─────────────────────────────
         var logAllocations = dto.LogIds
             .Select(id => (LogId: id, VolumeM3: inStockLogMap[id].VolumeM3))
@@ -179,7 +201,10 @@ public class SawmillController : ControllerBase
                 notes: dto.Notes?.Trim(),
                 startedBy: startedBy,
                 logs: logAllocations,
-                workerIds: dto.WorkerIds);
+                workerIds: dto.WorkerIds,
+                machineId: machine.MachineId,
+                machineCode: machine.MachineCode,
+                machineName: machine.Name);
         }
         catch (Exception ex)
         {
@@ -219,7 +244,7 @@ public class SawmillController : ControllerBase
             });
         }
 
-        createdJob.AssignedWorkerNames = workers.Select(w => w.FullName).ToList();
+        createdJob.AssignedWorkerNames = workers.Select(w => $"{w.FullName} ({w.EmployeeCode})").ToList();
 
         return StatusCode(201, createdJob);
     }

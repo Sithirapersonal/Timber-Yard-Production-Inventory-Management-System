@@ -81,6 +81,54 @@ public class SawmillRepository : ISawmillRepository
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Machines
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public async Task<IEnumerable<Machine>> GetMachinesAsync(string? searchQuery = null)
+    {
+        var machines = new List<Machine>();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var sql = "SELECT MachineId, MachineCode, Name, Status, CreatedAt FROM Machines";
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            sql += " WHERE (Name LIKE @q OR MachineCode LIKE @q)";
+        }
+        sql += " ORDER BY MachineCode ASC;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            cmd.Parameters.AddWithValue("@q", $"%{searchQuery.Trim()}%");
+        }
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            machines.Add(MapMachine(reader));
+        }
+        return machines;
+    }
+
+    public async Task<Machine?> GetMachineByIdAsync(int machineId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "SELECT MachineId, MachineCode, Name, Status, CreatedAt FROM Machines WHERE MachineId = @MachineId;";
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@MachineId", machineId);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return MapMachine(reader);
+        }
+        return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Job Code Generation
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -123,7 +171,10 @@ public class SawmillRepository : ISawmillRepository
         string? notes,
         int startedBy,
         IEnumerable<(int LogId, decimal VolumeM3)> logs,
-        IEnumerable<int> workerIds)
+        IEnumerable<int> workerIds,
+        int machineId,
+        string machineCode,
+        string machineName)
     {
         var logList = logs.ToList();
         var workerList = workerIds.ToList();
@@ -138,8 +189,8 @@ public class SawmillRepository : ISawmillRepository
 
             // 1. Insert SawJob
             const string jobSql = @"
-                INSERT INTO SawJobs (JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3, Notes, Status, StartedBy, StartedAt)
-                VALUES (@JobCode, @StockId, @SpeciesName, @LengthFt, @TotalVolumeM3, @Notes, 'InProgress', @StartedBy, UTC_TIMESTAMP());
+                INSERT INTO SawJobs (JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3, Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName)
+                VALUES (@JobCode, @StockId, @SpeciesName, @LengthFt, @TotalVolumeM3, @Notes, 'InProgress', @StartedBy, UTC_TIMESTAMP(), @MachineId, @MachineCode, @MachineName);
                 SELECT LAST_INSERT_ID();";
 
             int sawJobId;
@@ -152,6 +203,9 @@ public class SawmillRepository : ISawmillRepository
                 jobCmd.Parameters.AddWithValue("@TotalVolumeM3", totalVolumeM3);
                 jobCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
                 jobCmd.Parameters.AddWithValue("@StartedBy", startedBy);
+                jobCmd.Parameters.AddWithValue("@MachineId", machineId);
+                jobCmd.Parameters.AddWithValue("@MachineCode", machineCode);
+                jobCmd.Parameters.AddWithValue("@MachineName", machineName);
                 sawJobId = Convert.ToInt32(await jobCmd.ExecuteScalarAsync());
             }
 
@@ -197,6 +251,9 @@ public class SawmillRepository : ISawmillRepository
                 Status = "InProgress",
                 StartedBy = startedBy,
                 StartedAt = DateTime.UtcNow,
+                MachineId = machineId,
+                MachineCode = machineCode,
+                MachineName = machineName,
                 AllocatedLogs = logList.Select(l => new SawJobLogAllocation
                 {
                     SawJobId = sawJobId,
@@ -225,7 +282,7 @@ public class SawmillRepository : ISawmillRepository
         // Fetch job rows
         var sql = $@"
             SELECT SawJobId, JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3,
-                   Notes, Status, StartedBy, StartedAt
+                   Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName
             FROM SawJobs
             ORDER BY StartedAt DESC
             LIMIT {limit};";
@@ -246,7 +303,10 @@ public class SawmillRepository : ISawmillRepository
                     Notes = reader.IsDBNull(reader.GetOrdinal("Notes")) ? null : reader.GetString(reader.GetOrdinal("Notes")),
                     Status = reader.GetString(reader.GetOrdinal("Status")),
                     StartedBy = reader.GetInt32(reader.GetOrdinal("StartedBy")),
-                    StartedAt = reader.GetDateTime(reader.GetOrdinal("StartedAt"))
+                    StartedAt = reader.GetDateTime(reader.GetOrdinal("StartedAt")),
+                    MachineId = reader.IsDBNull(reader.GetOrdinal("MachineId")) ? 0 : reader.GetInt32(reader.GetOrdinal("MachineId")),
+                    MachineCode = reader.IsDBNull(reader.GetOrdinal("MachineCode")) ? "" : reader.GetString(reader.GetOrdinal("MachineCode")),
+                    MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName"))
                 });
             }
         }
@@ -261,11 +321,11 @@ public class SawmillRepository : ISawmillRepository
 
         if (jobs.Count == 0) return jobs;
 
-        // Fetch worker names for each job in a single query
+        // Fetch worker names (with employee codes) for each job in a single query
         var jobIds = jobs.Select(j => j.SawJobId).ToList();
         var workerParamNames = jobIds.Select((_, i) => $"@jid{i}").ToArray();
         var workerSql = $@"
-            SELECT sjw.SawJobId, w.FullName
+            SELECT sjw.SawJobId, w.FullName, w.EmployeeCode
             FROM SawJobWorkers sjw
             JOIN Workers w ON sjw.WorkerId = w.WorkerId
             WHERE sjw.SawJobId IN ({string.Join(",", workerParamNames)})
@@ -284,8 +344,9 @@ public class SawmillRepository : ISawmillRepository
             {
                 var jId = workerReader.GetInt32(workerReader.GetOrdinal("SawJobId"));
                 var name = workerReader.GetString(workerReader.GetOrdinal("FullName"));
+                var code = workerReader.GetString(workerReader.GetOrdinal("EmployeeCode"));
                 if (!workerMap.ContainsKey(jId)) workerMap[jId] = new List<string>();
-                workerMap[jId].Add(name);
+                workerMap[jId].Add($"{name} ({code})");
             }
         }
 
@@ -336,6 +397,15 @@ public class SawmillRepository : ISawmillRepository
         FullName = reader.GetString(reader.GetOrdinal("FullName")),
         JobRole = reader.GetString(reader.GetOrdinal("JobRole")),
         IsActive = reader.GetBoolean(reader.GetOrdinal("IsActive")),
+        CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"))
+    };
+
+    private static Machine MapMachine(System.Data.Common.DbDataReader reader) => new()
+    {
+        MachineId = reader.GetInt32(reader.GetOrdinal("MachineId")),
+        MachineCode = reader.GetString(reader.GetOrdinal("MachineCode")),
+        Name = reader.GetString(reader.GetOrdinal("Name")),
+        Status = reader.GetString(reader.GetOrdinal("Status")),
         CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"))
     };
 }

@@ -162,12 +162,9 @@ export default function SawingPage() {
             stockLoading={stockLoading}
             stockError={stockError}
             onRefresh={fetchStock}
-            recentJobs={recentJobs}
-            jobsLoading={jobsLoading}
-            jobsError={jobsError}
-            onRefreshJobs={fetchRecentJobs}
             canWrite={canWrite}
             onStartJob={handleStartJobFromOverview}
+            apiBaseUrl={API_BASE_URL}
           />
         )}
 
@@ -178,6 +175,10 @@ export default function SawingPage() {
             apiBaseUrl={API_BASE_URL}
             onJobSubmitted={handleJobSubmitted}
             onNotification={showNotification}
+            recentJobs={recentJobs}
+            jobsLoading={jobsLoading}
+            jobsError={jobsError}
+            onRefreshJobs={fetchRecentJobs}
           />
         )}
 

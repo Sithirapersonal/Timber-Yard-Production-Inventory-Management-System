@@ -169,6 +169,7 @@ public class LogItemDto
     public decimal GirthFt { get; set; }
     public decimal VolumeM3 { get; set; }
     public string Status { get; set; } = "InStock";
+    public int DeliveryId { get; set; }
     public string? SupplierName { get; set; }
     public DateTime CreatedAt { get; set; }
 }

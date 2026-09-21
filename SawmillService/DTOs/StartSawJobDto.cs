@@ -17,6 +17,9 @@ public class StartSawJobDto
     /// <summary>WorkerIds from the local SawmillDB Workers table. Must be non-empty and all active.</summary>
     public List<int> WorkerIds { get; set; } = new();
 
+    /// <summary>MachineId from the local SawmillDB Machines table. Exactly one machine per job; must be 'Available'.</summary>
+    public int MachineId { get; set; }
+
     /// <summary>Optional operator notes (max 500 chars).</summary>
     public string? Notes { get; set; }
 }

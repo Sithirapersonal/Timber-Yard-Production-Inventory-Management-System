@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { fetchWithAuth } from '../../utils/api';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
+import SawJobStatusPill from './SawJobStatusPill';
 
 const NOTES_MAX = 500;
 
@@ -13,6 +14,8 @@ const NOTES_MAX = 500;
  *    GET /stock, proxied from LogIntakeService).
  *  - In-stock logs for the selected batch come from GET /stock/{id}/logs.
  *  - Workers come from GET /workers?q=.
+ *  - Machines come from GET /machines?q= — exactly one machine per job;
+ *    machines not currently 'Available' are shown but disabled.
  * Submitting posts to POST /jobs; on success the parent refreshes both the
  * Overview tab's stock and the "Recently Started Jobs" list and switches
  * back to the Overview tab.
@@ -23,6 +26,10 @@ export default function StartJobTab({
   apiBaseUrl,
   onJobSubmitted,
   onNotification,
+  recentJobs,
+  jobsLoading,
+  jobsError,
+  onRefreshJobs,
 }) {
   // ── Stock selection ────────────────────────────────────────────────────
   const [selectedStockId, setSelectedStockId] = useState('');
@@ -97,6 +104,62 @@ export default function StartJobTab({
         .reduce((sum, l) => sum + Number(l.volumeM3 || 0), 0),
     [logs, selectedLogIds]
   );
+
+  // ── Machine allocation (exactly one per job) ────────────────────────────
+  const [selectedMachineId, setSelectedMachineId] = useState(null);
+  const [selectedMachine, setSelectedMachine] = useState(null);
+
+  const [machineModalOpen, setMachineModalOpen] = useState(false);
+  const [machineSearch, setMachineSearch] = useState('');
+  const [machines, setMachines] = useState([]);
+  const [machinesLoading, setMachinesLoading] = useState(false);
+  const [machinesError, setMachinesError] = useState('');
+  const [stagedMachineId, setStagedMachineId] = useState(null);
+
+  const fetchMachines = useCallback(async (q) => {
+    setMachinesLoading(true);
+    setMachinesError('');
+    try {
+      const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+      const res = await fetchWithAuth(`${apiBaseUrl}/machines${qs}`);
+      if (res.ok) {
+        setMachines(await res.json());
+      } else {
+        const body = await res.json().catch(() => null);
+        setMachinesError(body?.message || `Failed to load machines (${res.status}).`);
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') setMachinesError('Network error loading machines.');
+    } finally {
+      setMachinesLoading(false);
+    }
+  }, [apiBaseUrl]);
+
+  const openMachineModal = () => {
+    setStagedMachineId(selectedMachineId);
+    setMachineSearch('');
+    setMachineModalOpen(true);
+    fetchMachines('');
+  };
+
+  useEffect(() => {
+    if (!machineModalOpen) return;
+    const handle = setTimeout(() => fetchMachines(machineSearch), 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineSearch, machineModalOpen]);
+
+  const confirmMachineModal = () => {
+    const machine = machines.find((m) => m.machineId === stagedMachineId) || null;
+    setSelectedMachineId(stagedMachineId);
+    setSelectedMachine(machine);
+    setMachineModalOpen(false);
+  };
+
+  const removeMachineChip = () => {
+    setSelectedMachineId(null);
+    setSelectedMachine(null);
+  };
 
   // ── Worker allocation ──────────────────────────────────────────────────
   const [selectedWorkerIds, setSelectedWorkerIds] = useState(new Set());
@@ -182,13 +245,19 @@ export default function StartJobTab({
     setSelectedLogIds(new Set());
     setSelectedWorkerIds(new Set());
     setSelectedWorkersMap(new Map());
+    setSelectedMachineId(null);
+    setSelectedMachine(null);
     setNotes('');
   };
 
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit =
-    !!selectedStockId && selectedLogIds.size > 0 && selectedWorkerIds.size > 0 && !submitting;
+    !!selectedStockId &&
+    selectedLogIds.size > 0 &&
+    selectedWorkerIds.size > 0 &&
+    !!selectedMachineId &&
+    !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -200,6 +269,7 @@ export default function StartJobTab({
           stockId: Number(selectedStockId),
           logIds: Array.from(selectedLogIds),
           workerIds: Array.from(selectedWorkerIds),
+          machineId: selectedMachineId,
           notes: notes.trim() || null,
         }),
       });
@@ -218,6 +288,17 @@ export default function StartJobTab({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // ── Recently started jobs: expand/collapse machine + worker detail ─────
+  const [expandedJobIds, setExpandedJobIds] = useState(new Set());
+  const toggleJobExpand = (sawJobId) => {
+    setExpandedJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sawJobId)) next.delete(sawJobId);
+      else next.add(sawJobId);
+      return next;
+    });
   };
 
   return (
@@ -308,32 +389,57 @@ export default function StartJobTab({
           </span>
         </div>
 
-        {/* ── Worker allocation ────────────────────────────────────────── */}
-        <div>
-          <label className="block text-sm font-semibold text-charcoal mb-1.5">Assigned Workers</label>
-          <div className="flex flex-wrap items-center gap-2">
-            {Array.from(selectedWorkerIds).map((id) => {
-              const worker = selectedWorkersMap.get(id);
-              return (
-                <span
-                  key={id}
-                  className="inline-flex items-center gap-1.5 bg-heartwood/10 text-heartwood-dark text-sm font-medium px-3 py-1.5 rounded-full"
-                >
-                  {worker ? worker.fullName : `Worker #${id}`}
+        {/* ── Machine & Worker allocation ──────────────────────────────── */}
+        <div className="flex flex-wrap gap-8">
+          <div className="flex-1 min-w-[220px]">
+            <label className="block text-sm font-semibold text-charcoal mb-1.5">Allocated Machine</label>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedMachineId && (
+                <span className="inline-flex items-center gap-1.5 bg-moss/10 text-moss text-sm font-medium px-3 py-1.5 rounded-full">
+                  {selectedMachine ? `${selectedMachine.name} (${selectedMachine.machineCode})` : `Machine #${selectedMachineId}`}
                   <button
                     type="button"
-                    onClick={() => removeWorkerChip(id)}
-                    className="text-heartwood-dark/70 hover:text-rust font-bold"
-                    aria-label="Remove worker"
+                    onClick={removeMachineChip}
+                    className="text-moss/70 hover:text-rust font-bold"
+                    aria-label="Remove machine"
                   >
                     ×
                   </button>
                 </span>
-              );
-            })}
-            <Button variant="ghost" onClick={openWorkerModal}>
-              + Assign Workers
-            </Button>
+              )}
+              <Button variant="ghost" onClick={openMachineModal}>
+                + Allocate Machine
+              </Button>
+            </div>
+            <p className="text-sm text-fog mt-1.5">One machine per saw job. Machines under maintenance can't be selected.</p>
+          </div>
+
+          <div className="flex-1 min-w-[220px]">
+            <label className="block text-sm font-semibold text-charcoal mb-1.5">Assigned Workers</label>
+            <div className="flex flex-wrap items-center gap-2">
+              {Array.from(selectedWorkerIds).map((id) => {
+                const worker = selectedWorkersMap.get(id);
+                return (
+                  <span
+                    key={id}
+                    className="inline-flex items-center gap-1.5 bg-heartwood/10 text-heartwood-dark text-sm font-medium px-3 py-1.5 rounded-full"
+                  >
+                    {worker ? worker.fullName : `Worker #${id}`}
+                    <button
+                      type="button"
+                      onClick={() => removeWorkerChip(id)}
+                      className="text-heartwood-dark/70 hover:text-rust font-bold"
+                      aria-label="Remove worker"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+              <Button variant="ghost" onClick={openWorkerModal}>
+                + Assign Workers
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -360,6 +466,110 @@ export default function StartJobTab({
           <Button variant="ghost" onClick={resetForm} disabled={submitting}>
             Clear
           </Button>
+        </div>
+      </Card>
+
+      {/* ── Recently started jobs ─────────────────────────────────────── */}
+      <Card className="overflow-hidden">
+        <div className="p-4 border-b border-charcoal/10 flex flex-wrap items-center justify-between gap-2 bg-sawdust/60">
+          <div>
+            <h2 className="text-base font-semibold text-charcoal">Recently Started Jobs</h2>
+            <p className="text-sm text-fog mt-0.5">Latest saw jobs recorded in the sawmill.</p>
+          </div>
+          <Button variant="ghost" onClick={onRefreshJobs} disabled={jobsLoading}>
+            {jobsLoading ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
+
+        {jobsError && (
+          <div className="px-4 py-3 text-sm font-medium text-rust bg-rust/10 border-b border-rust/20">
+            {jobsError}
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-sawdust/60 text-fog border-b border-charcoal/10">
+              <tr>
+                <th className="py-3 px-4 w-10"></th>
+                <th className="py-3 px-4 font-semibold">Job Code</th>
+                <th className="py-3 px-4 font-semibold">Volume (m³)</th>
+                <th className="py-3 px-4 font-semibold">Machine</th>
+                <th className="py-3 px-4 font-semibold">Workers</th>
+                <th className="py-3 px-4 font-semibold">Status</th>
+                <th className="py-3 px-4 font-semibold">Started</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-charcoal/10">
+              {recentJobs.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-6 px-4 text-center text-fog">
+                    {jobsLoading ? 'Loading jobs…' : 'No saw jobs have been started yet.'}
+                  </td>
+                </tr>
+              ) : (
+                recentJobs.map((job) => {
+                  const isExpanded = expandedJobIds.has(job.sawJobId);
+                  return (
+                    <Fragment key={job.sawJobId}>
+                      <tr className="hover:bg-sawdust/40 transition-colors">
+                        <td className="py-3 px-4 w-10 text-center">
+                          <button
+                            type="button"
+                            onClick={() => toggleJobExpand(job.sawJobId)}
+                            className="text-fog hover:text-charcoal p-1 rounded inline-flex items-center justify-center"
+                            title={isExpanded ? 'Collapse job details' : 'Show species & length details'}
+                          >
+                            <svg
+                              className={`w-4 h-4 transform transition-transform ${isExpanded ? 'rotate-90 text-heartwood' : ''}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                        </td>
+                        <td className="py-3 px-4 font-mono font-semibold text-charcoal">{job.jobCode}</td>
+                        <td className="py-3 px-4 font-semibold text-charcoal">
+                          {Number(job.totalVolumeM3).toFixed(4)} m³
+                        </td>
+                        <td className="py-3 px-4 text-charcoal">
+                          {job.machineName ? `${job.machineName} (${job.machineCode})` : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-charcoal">
+                          {job.assignedWorkerNames?.length ? job.assignedWorkerNames.join(', ') : '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <SawJobStatusPill status={job.status} />
+                        </td>
+                        <td className="py-3 px-4 text-fog">
+                          {job.startedAt ? new Date(job.startedAt).toLocaleString() : '—'}
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-sawdust/40 border-b border-charcoal/10">
+                          <td></td>
+                          <td colSpan={6} className="py-3 px-4 text-sm text-charcoal">
+                            <div className="flex flex-col gap-1.5">
+                              <span className="inline-flex items-center gap-2">
+                                <span className="font-semibold text-charcoal">Species:</span>
+                                <span>{job.speciesName}</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2">
+                                <span className="font-semibold text-charcoal">Length:</span>
+                                <span>{job.lengthFt} ft</span>
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </Card>
 
@@ -414,6 +624,71 @@ export default function StartJobTab({
               </Button>
               <Button variant="primary" onClick={confirmWorkerModal}>
                 Confirm ({stagedWorkerIds.size})
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Machine selection modal ──────────────────────────────────── */}
+      {machineModalOpen && (
+        <div className="fixed inset-0 bg-charcoal/40 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-md p-5 space-y-4">
+            <h3 className="text-lg font-semibold text-charcoal">Allocate Machine</h3>
+            <p className="text-sm text-fog">Select the machine this saw job will run on.</p>
+
+            <input
+              type="text"
+              value={machineSearch}
+              onChange={(e) => setMachineSearch(e.target.value)}
+              placeholder="Search by name or machine code…"
+              className="w-full px-3 py-2.5 border border-charcoal/20 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+            />
+
+            {machinesError && (
+              <div className="px-3 py-2 rounded-md text-sm font-medium text-rust bg-rust/10 border border-rust/20">
+                {machinesError}
+              </div>
+            )}
+
+            <div className="border border-charcoal/10 rounded-md max-h-60 overflow-y-auto divide-y divide-charcoal/10">
+              {machinesLoading ? (
+                <p className="p-4 text-sm text-fog">Loading machines…</p>
+              ) : machines.length === 0 ? (
+                <p className="p-4 text-sm text-fog">No machines match your search.</p>
+              ) : (
+                machines.map((machine) => {
+                  const disabled = machine.status !== 'Available';
+                  return (
+                    <label
+                      key={machine.machineId}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm ${
+                        disabled ? 'opacity-45 cursor-not-allowed' : 'hover:bg-sawdust/50 cursor-pointer'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="machinePick"
+                        checked={stagedMachineId === machine.machineId}
+                        onChange={() => !disabled && setStagedMachineId(machine.machineId)}
+                        disabled={disabled}
+                        className="w-4 h-4 accent-heartwood"
+                      />
+                      <span className="font-semibold text-charcoal">{machine.name}</span>
+                      <span className="font-mono text-fog">{machine.machineCode}</span>
+                      <span className="text-fog ml-auto">{machine.status}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="ghost" onClick={() => setMachineModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" disabled={!stagedMachineId} onClick={confirmMachineModal}>
+                Confirm Selection
               </Button>
             </div>
           </Card>

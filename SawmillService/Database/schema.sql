@@ -11,9 +11,19 @@ CREATE TABLE IF NOT EXISTS Workers (
     CreatedAt   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. SawJobs Table
+-- 2. Machines Table (physical saw rigs — exactly one allocated per SawJob)
+CREATE TABLE IF NOT EXISTS Machines (
+    MachineId   INT AUTO_INCREMENT PRIMARY KEY,
+    MachineCode VARCHAR(20) UNIQUE NOT NULL,   -- e.g. MCH-01
+    Name        VARCHAR(100) NOT NULL,
+    Status      ENUM('Available','InUse','UnderMaintenance') NOT NULL DEFAULT 'Available',
+    CreatedAt   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. SawJobs Table
 --    StockId is a value-only reference to LogIntakeService's Stock.StockId (no cross-DB FK).
 --    SpeciesName / LengthFt are denormalized snapshots taken at job-creation time.
+--    MachineCode / MachineName are denormalized snapshots of the allocated machine.
 --    TotalVolumeM3 is computed server-side (sum of allocated logs' VolumeM3).
 --    JobCode is generated server-side as SAW-001, SAW-002, ...
 CREATE TABLE IF NOT EXISTS SawJobs (
@@ -26,7 +36,11 @@ CREATE TABLE IF NOT EXISTS SawJobs (
     Notes        VARCHAR(500) NULL,
     Status       ENUM('InProgress','Completed','Cancelled') NOT NULL DEFAULT 'InProgress',
     StartedBy    INT NOT NULL,       -- userId claim from JWT
-    StartedAt    DATETIME DEFAULT CURRENT_TIMESTAMP
+    StartedAt    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    MachineId    INT NOT NULL,
+    MachineCode  VARCHAR(20) NOT NULL,
+    MachineName  VARCHAR(100) NOT NULL,
+    CONSTRAINT fk_sawjobs_machine FOREIGN KEY (MachineId) REFERENCES Machines(MachineId)
 );
 
 -- 3. SawJobLogs Table (which LogIntakeService logs were cut in this job)
@@ -58,3 +72,12 @@ INSERT INTO Workers (EmployeeCode, FullName, JobRole, IsActive) VALUES
     ('EMP-015', 'Ajith Bandara',     'Sawyer',            TRUE),
     ('EMP-016', 'Pradeep Wijesinghe','Log Handler',       TRUE)
 ON DUPLICATE KEY UPDATE EmployeeCode = VALUES(EmployeeCode);
+
+-- Seed Data: machines
+INSERT INTO Machines (MachineCode, Name, Status) VALUES
+    ('MCH-01', 'Circular Saw Rig A', 'Available'),
+    ('MCH-02', 'Band Saw B',         'Available'),
+    ('MCH-03', 'Circular Saw Rig C', 'UnderMaintenance'),
+    ('MCH-04', 'Edger Saw D',        'Available'),
+    ('MCH-05', 'Band Saw E',         'InUse')
+ON DUPLICATE KEY UPDATE MachineCode = VALUES(MachineCode);
