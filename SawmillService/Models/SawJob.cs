@@ -27,6 +27,9 @@ public class SawJob
     public string MachineCode { get; set; } = string.Empty;
     public string MachineName { get; set; } = string.Empty;
 
+    public decimal? OutputVolumeM3 { get; set; }
+    public decimal? WastageM3 { get; set; }
+
     // Populated for list/detail views — not stored in DB
     public List<string> AssignedWorkerNames { get; set; } = new();
     public List<SawJobLogAllocation> AllocatedLogs { get; set; } = new();

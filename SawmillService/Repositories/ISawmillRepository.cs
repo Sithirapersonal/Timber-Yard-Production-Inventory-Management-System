@@ -28,6 +28,12 @@ public interface ISawmillRepository
 
     // Saw-job reads
     Task<IEnumerable<SawJob>> GetRecentJobsAsync(int limit = 20);
+    Task<SawJob?> GetJobByIdAsync(int sawJobId);
+
+    // Job completion & revert
+    Task<bool> CompleteSawJobAsync(int sawJobId, decimal outputVolumeM3, decimal wastageM3);
+    Task<bool> RevertToInProgressAsync(int sawJobId);
+    Task<bool> IsMachineInUseAsync(int machineId, int excludeSawJobId);
 
     // Job cancellation (Admin only)
     Task<bool> CancelJobAsync(int sawJobId);

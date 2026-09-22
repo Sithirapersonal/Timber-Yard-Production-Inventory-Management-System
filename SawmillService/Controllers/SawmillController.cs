@@ -261,6 +261,58 @@ public class SawmillController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // PUT api/Sawmill/jobs/{id}/complete
+    // Admin, Manager, Supervisor — marks an InProgress saw job Completed with sawn board output.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpPut("jobs/{id:int}/complete")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> CompleteSawJob(int id, [FromBody] CompleteSawJobDto dto)
+    {
+        if (dto.Boards == null || dto.Boards.Count == 0 ||
+            dto.Boards.Any(b => b.LengthFt <= 0 || b.WidthIn <= 0 || b.ThicknessIn <= 0 || b.Quantity <= 0))
+        {
+            return BadRequest(new { message = "Enter a valid length, width, thickness and quantity for every board row." });
+        }
+
+        var job = await _repository.GetJobByIdAsync(id);
+        if (job == null)
+        {
+            return NotFound(new { message = "Job not found." });
+        }
+
+        if (job.Status != "InProgress")
+        {
+            return Conflict(new { message = "This job is no longer In Progress and cannot be completed." });
+        }
+
+        const decimal cubicFeetToCubicMeters = 0.028316846592m;
+        decimal totalBoardVolumeFt3 = dto.Boards.Sum(b => b.LengthFt * (b.WidthIn / 12m) * (b.ThicknessIn / 12m) * b.Quantity);
+        decimal totalBoardVolumeM3 = Math.Round(totalBoardVolumeFt3 * cubicFeetToCubicMeters, 4, MidpointRounding.AwayFromZero);
+
+        decimal wastageM3 = job.TotalVolumeM3 - totalBoardVolumeM3;
+        decimal deviation = job.TotalVolumeM3 > 0 ? Math.Abs(wastageM3) / job.TotalVolumeM3 : 0m;
+        bool looksOff = (wastageM3 < 0) || (deviation > 0.35m);
+
+        if (looksOff && !dto.AcknowledgedDeviationWarning)
+        {
+            return Conflict(new
+            {
+                requiresAcknowledgment = true,
+                message = "This looks off — the boards entered deviate significantly from the raw input volume logged for this job."
+            });
+        }
+
+        var completed = await _repository.CompleteSawJobAsync(id, totalBoardVolumeM3, wastageM3);
+        if (!completed)
+        {
+            return Conflict(new { message = "This job is no longer In Progress and cannot be completed." });
+        }
+
+        var updatedJob = await _repository.GetJobByIdAsync(id);
+        return Ok(updatedJob);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // PUT api/Sawmill/jobs/{id}/cancel
     // Admin only — marks a job Cancelled.
     // Logs are NOT reverted to InStock (see SawmillRepository.CancelJobAsync for rationale).
@@ -275,6 +327,44 @@ public class SawmillController : ControllerBase
             return NotFound(new { message = "Job not found or is not in an InProgress state." });
         }
         return Ok(new { message = "Saw job cancelled successfully." });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUT api/Sawmill/jobs/{id}/revert
+    // Admin, Manager, Supervisor — reverts a Completed or Cancelled job back to InProgress.
+    // Clears OutputVolumeM3 and WastageM3. Verifies machine is not in use on another job.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpPut("jobs/{id:int}/revert")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> RevertJob(int id)
+    {
+        var job = await _repository.GetJobByIdAsync(id);
+        if (job == null)
+        {
+            return NotFound(new { message = "Job not found." });
+        }
+
+        if (job.Status == "InProgress")
+        {
+            return Conflict(new { message = "Job is already In Progress." });
+        }
+
+        if (job.MachineId > 0 && await _repository.IsMachineInUseAsync(job.MachineId, id))
+        {
+            return Conflict(new
+            {
+                message = $"Cannot revert job {job.JobCode} to In Progress because machine {job.MachineName} ({job.MachineCode}) is currently in use on another active job."
+            });
+        }
+
+        var reverted = await _repository.RevertToInProgressAsync(id);
+        if (!reverted)
+        {
+            return Conflict(new { message = "Could not revert job to In Progress." });
+        }
+
+        var updatedJob = await _repository.GetJobByIdAsync(id);
+        return Ok(updatedJob);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

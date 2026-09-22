@@ -282,7 +282,8 @@ public class SawmillRepository : ISawmillRepository
         // Fetch job rows
         var sql = $@"
             SELECT SawJobId, JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3,
-                   Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName
+                   Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName,
+                   OutputVolumeM3, WastageM3
             FROM SawJobs
             ORDER BY StartedAt DESC
             LIMIT {limit};";
@@ -306,7 +307,9 @@ public class SawmillRepository : ISawmillRepository
                     StartedAt = reader.GetDateTime(reader.GetOrdinal("StartedAt")),
                     MachineId = reader.IsDBNull(reader.GetOrdinal("MachineId")) ? 0 : reader.GetInt32(reader.GetOrdinal("MachineId")),
                     MachineCode = reader.IsDBNull(reader.GetOrdinal("MachineCode")) ? "" : reader.GetString(reader.GetOrdinal("MachineCode")),
-                    MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName"))
+                    MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName")),
+                    OutputVolumeM3 = reader.IsDBNull(reader.GetOrdinal("OutputVolumeM3")) ? null : reader.GetDecimal(reader.GetOrdinal("OutputVolumeM3")),
+                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3"))
                 });
             }
         }
@@ -357,6 +360,122 @@ public class SawmillRepository : ISawmillRepository
         }
 
         return jobs;
+    }
+
+    public async Task<SawJob?> GetJobByIdAsync(int sawJobId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            SELECT SawJobId, JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3,
+                   Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName,
+                   OutputVolumeM3, WastageM3
+            FROM SawJobs
+            WHERE SawJobId = @SawJobId;";
+
+        SawJob? job = null;
+        await using (var cmd = new MySqlCommand(sql, connection))
+        {
+            cmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                job = new SawJob
+                {
+                    SawJobId = reader.GetInt32(reader.GetOrdinal("SawJobId")),
+                    JobCode = reader.GetString(reader.GetOrdinal("JobCode")),
+                    StockId = reader.GetInt32(reader.GetOrdinal("StockId")),
+                    SpeciesName = reader.GetString(reader.GetOrdinal("SpeciesName")),
+                    LengthFt = reader.GetDecimal(reader.GetOrdinal("LengthFt")),
+                    TotalVolumeM3 = reader.GetDecimal(reader.GetOrdinal("TotalVolumeM3")),
+                    Notes = reader.IsDBNull(reader.GetOrdinal("Notes")) ? null : reader.GetString(reader.GetOrdinal("Notes")),
+                    Status = reader.GetString(reader.GetOrdinal("Status")),
+                    StartedBy = reader.GetInt32(reader.GetOrdinal("StartedBy")),
+                    StartedAt = reader.GetDateTime(reader.GetOrdinal("StartedAt")),
+                    MachineId = reader.IsDBNull(reader.GetOrdinal("MachineId")) ? 0 : reader.GetInt32(reader.GetOrdinal("MachineId")),
+                    MachineCode = reader.IsDBNull(reader.GetOrdinal("MachineCode")) ? "" : reader.GetString(reader.GetOrdinal("MachineCode")),
+                    MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName")),
+                    OutputVolumeM3 = reader.IsDBNull(reader.GetOrdinal("OutputVolumeM3")) ? null : reader.GetDecimal(reader.GetOrdinal("OutputVolumeM3")),
+                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3"))
+                };
+            }
+        }
+
+        if (job == null) return null;
+
+        const string workerSql = @"
+            SELECT w.FullName, w.EmployeeCode
+            FROM SawJobWorkers sjw
+            JOIN Workers w ON sjw.WorkerId = w.WorkerId
+            WHERE sjw.SawJobId = @SawJobId
+            ORDER BY w.FullName ASC;";
+
+        await using (var workerCmd = new MySqlCommand(workerSql, connection))
+        {
+            workerCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+            await using var workerReader = await workerCmd.ExecuteReaderAsync();
+            while (await workerReader.ReadAsync())
+            {
+                var name = workerReader.GetString(workerReader.GetOrdinal("FullName"));
+                var code = workerReader.GetString(workerReader.GetOrdinal("EmployeeCode"));
+                job.AssignedWorkerNames.Add($"{name} ({code})");
+            }
+        }
+
+        return job;
+    }
+
+    public async Task<bool> CompleteSawJobAsync(int sawJobId, decimal outputVolumeM3, decimal wastageM3)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            UPDATE SawJobs
+            SET Status = 'Completed', OutputVolumeM3 = @OutputVolumeM3, WastageM3 = @WastageM3
+            WHERE SawJobId = @SawJobId AND Status = 'InProgress';";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+        cmd.Parameters.AddWithValue("@OutputVolumeM3", outputVolumeM3);
+        cmd.Parameters.AddWithValue("@WastageM3", wastageM3);
+
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    public async Task<bool> RevertToInProgressAsync(int sawJobId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            UPDATE SawJobs
+            SET Status = 'InProgress', OutputVolumeM3 = NULL, WastageM3 = NULL
+            WHERE SawJobId = @SawJobId AND Status IN ('Completed', 'Cancelled');";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    public async Task<bool> IsMachineInUseAsync(int machineId, int excludeSawJobId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            SELECT COUNT(*)
+            FROM SawJobs
+            WHERE MachineId = @MachineId AND Status = 'InProgress' AND SawJobId != @ExcludeSawJobId;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@MachineId", machineId);
+        cmd.Parameters.AddWithValue("@ExcludeSawJobId", excludeSawJobId);
+
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        return count > 0;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

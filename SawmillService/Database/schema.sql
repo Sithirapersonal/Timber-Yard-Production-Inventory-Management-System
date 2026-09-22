@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS SawJobs (
     MachineId    INT NOT NULL,
     MachineCode  VARCHAR(20) NOT NULL,
     MachineName  VARCHAR(100) NOT NULL,
+    OutputVolumeM3 DECIMAL(10,4) NULL,   -- total sawn board volume, computed server-side, set only on Complete
+    WastageM3    DECIMAL(10,4) NULL,   -- TotalVolumeM3 - OutputVolumeM3, computed server-side, set only on Complete
     CONSTRAINT fk_sawjobs_machine FOREIGN KEY (MachineId) REFERENCES Machines(MachineId)
 );
 

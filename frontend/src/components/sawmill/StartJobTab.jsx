@@ -301,6 +301,189 @@ export default function StartJobTab({
     });
   };
 
+  // ── Status change / Cancel / Complete / Revert flows ────────────────────
+  const [cancelModal, setCancelModal] = useState({ isOpen: false, job: null });
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+
+  const [completeModal, setCompleteModal] = useState({ isOpen: false, job: null });
+  const [boardRows, setBoardRows] = useState([
+    { id: 1, lengthFt: '', widthIn: '', thicknessIn: '', quantity: '' },
+  ]);
+  const [completeWarning, setCompleteWarning] = useState({
+    show: false,
+    message: '',
+    acknowledged: false,
+  });
+  const [completeError, setCompleteError] = useState('');
+  const [completeSubmitting, setCompleteSubmitting] = useState(false);
+
+  const makeBoardRow = () => ({
+    id: Date.now() + Math.random(),
+    lengthFt: '',
+    widthIn: '',
+    thicknessIn: '',
+    quantity: '',
+  });
+
+  const addBoardRow = () => {
+    setBoardRows((prev) => [...prev, makeBoardRow()]);
+  };
+
+  const removeBoardRow = (id) => {
+    if (boardRows.length <= 1) return;
+    setBoardRows((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const updateBoardRow = (id, field, value) => {
+    setBoardRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const openCompleteModal = (job) => {
+    setCompleteModal({ isOpen: true, job });
+    setBoardRows([makeBoardRow()]);
+    setCompleteWarning({ show: false, message: '', acknowledged: false });
+    setCompleteError('');
+  };
+
+  const closeCompleteModal = () => {
+    setCompleteModal({ isOpen: false, job: null });
+    setBoardRows([makeBoardRow()]);
+    setCompleteWarning({ show: false, message: '', acknowledged: false });
+    setCompleteError('');
+  };
+
+  const handleSelectStatus = (job, targetStatus) => {
+    if (targetStatus === job.status) return;
+
+    if (targetStatus === 'Completed') {
+      openCompleteModal(job);
+    } else if (targetStatus === 'Cancelled') {
+      setCancelModal({ isOpen: true, job });
+    } else if (targetStatus === 'InProgress') {
+      handleRevertJob(job);
+    }
+  };
+
+  const handleCancelJobConfirm = async () => {
+    if (!cancelModal.job) return;
+    setCancelSubmitting(true);
+    try {
+      const res = await fetchWithAuth(`${apiBaseUrl}/jobs/${cancelModal.job.sawJobId}/cancel`, {
+        method: 'PUT',
+      });
+      if (res.ok) {
+        onNotification('success', `Saw job ${cancelModal.job.jobCode} cancelled.`);
+        setCancelModal({ isOpen: false, job: null });
+        onRefreshJobs();
+      } else {
+        const body = await res.json().catch(() => null);
+        onNotification('error', body?.message || 'Failed to cancel saw job.');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') {
+        onNotification('error', 'Network error cancelling saw job.');
+      }
+    } finally {
+      setCancelSubmitting(false);
+    }
+  };
+
+  const handleRevertJob = async (job) => {
+    try {
+      const res = await fetchWithAuth(`${apiBaseUrl}/jobs/${job.sawJobId}/revert`, {
+        method: 'PUT',
+      });
+      if (res.ok) {
+        onNotification('success', `Saw job ${job.jobCode} reverted to In Progress.`);
+        onRefreshJobs();
+      } else {
+        const body = await res.json().catch(() => null);
+        onNotification('error', body?.message || 'Failed to revert saw job to In Progress.');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') {
+        onNotification('error', 'Network error reverting saw job.');
+      }
+    }
+  };
+
+  const submitCompleteJob = async () => {
+    if (!completeModal.job) return;
+
+    const parsedBoards = boardRows.map((r) => ({
+      lengthFt: parseFloat(r.lengthFt),
+      widthIn: parseFloat(r.widthIn),
+      thicknessIn: parseFloat(r.thicknessIn),
+      quantity: parseInt(r.quantity, 10),
+    }));
+
+    const isInvalid = parsedBoards.some(
+      (b) =>
+        isNaN(b.lengthFt) || b.lengthFt <= 0 ||
+        isNaN(b.widthIn) || b.widthIn <= 0 ||
+        isNaN(b.thicknessIn) || b.thicknessIn <= 0 ||
+        isNaN(b.quantity) || b.quantity <= 0
+    );
+
+    if (isInvalid) {
+      setCompleteError('Enter a valid length, width, thickness and quantity for every board row.');
+      return;
+    }
+
+    setCompleteError('');
+    setCompleteSubmitting(true);
+
+    try {
+      const res = await fetchWithAuth(
+        `${apiBaseUrl}/jobs/${completeModal.job.sawJobId}/complete`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            boards: parsedBoards,
+            acknowledgedDeviationWarning: completeWarning.show && completeWarning.acknowledged,
+          }),
+        }
+      );
+
+      if (res.ok) {
+        onNotification(
+          'success',
+          `Saw job ${completeModal.job.jobCode} marked complete — sawn output recorded.`
+        );
+        closeCompleteModal();
+        onRefreshJobs();
+      } else if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        if (body?.requiresAcknowledgment) {
+          setCompleteWarning({
+            show: true,
+            message: body.message,
+            acknowledged: false,
+          });
+        } else {
+          setCompleteError(body?.message || 'This job is no longer In Progress and cannot be completed.');
+        }
+      } else if (res.status === 400) {
+        const body = await res.json().catch(() => null);
+        setCompleteError(body?.message || 'Enter a valid length, width, thickness and quantity for every board row.');
+      } else {
+        const body = await res.json().catch(() => null);
+        setCompleteError(
+          body?.message || `Failed to complete saw job (${res.status}).`
+        );
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') {
+        setCompleteError('Network error completing saw job.');
+      }
+    } finally {
+      setCompleteSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card className="p-6 space-y-6">
@@ -541,7 +724,10 @@ export default function StartJobTab({
                           {job.assignedWorkerNames?.length ? job.assignedWorkerNames.join(', ') : '—'}
                         </td>
                         <td className="py-3 px-4">
-                          <SawJobStatusPill status={job.status} />
+                          <SawJobStatusPill
+                            status={job.status}
+                            onSelectStatus={(targetStatus) => handleSelectStatus(job, targetStatus)}
+                          />
                         </td>
                         <td className="py-3 px-4 text-fog">
                           {job.startedAt ? new Date(job.startedAt).toLocaleString() : '—'}
@@ -692,6 +878,172 @@ export default function StartJobTab({
               </Button>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* ── Cancel job confirmation modal ──────────────────────────────── */}
+      {cancelModal.isOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-gray-800">Cancel Saw Job</h3>
+            <p className="text-sm text-gray-600">
+              Are you sure you want to cancel job{' '}
+              <span className="font-semibold text-gray-800">{cancelModal.job?.jobCode}</span>?
+              This will stop the job without recording any sawn output.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCancelModal({ isOpen: false, job: null })}
+                disabled={cancelSubmitting}
+                className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelJobConfirm}
+                disabled={cancelSubmitting}
+                className="px-4 py-2 bg-rust hover:bg-rust/90 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {cancelSubmitting ? 'Cancelling…' : 'Confirm Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Complete saw job modal ─────────────────────────────────────── */}
+      {completeModal.isOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="border-b border-charcoal/10 pb-3">
+              <h3 className="text-lg font-bold text-charcoal">
+                Complete Saw Job{' '}
+                <span className="font-mono text-fog font-normal">— {completeModal.job?.jobCode}</span>
+              </h3>
+              <p className="text-xs text-fog mt-1">
+                Enter the boards produced from this job — length, width, thickness and quantity for each board size.
+              </p>
+            </div>
+
+            {completeError && (
+              <div className="px-3 py-2 rounded-md text-sm font-medium text-rust bg-rust/10 border border-rust/20">
+                {completeError}
+              </div>
+            )}
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1">
+              <div className="border border-charcoal/15 rounded-lg overflow-hidden">
+                <div className="grid grid-cols-[1fr_1fr_1fr_0.8fr_32px] gap-2 px-3 py-2 bg-sawdust/60 text-fog text-[11px] font-semibold uppercase tracking-wider">
+                  <span>Length (ft)</span>
+                  <span>Width (in)</span>
+                  <span>Thickness (in)</span>
+                  <span>Qty</span>
+                  <span></span>
+                </div>
+                <div className="divide-y divide-charcoal/10 max-h-56 overflow-y-auto">
+                  {boardRows.map((row) => (
+                    <div key={row.id} className="grid grid-cols-[1fr_1fr_1fr_0.8fr_32px] gap-2 px-3 py-2 items-center">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.01"
+                        placeholder="e.g. 10"
+                        value={row.lengthFt}
+                        onChange={(e) => updateBoardRow(row.id, 'lengthFt', e.target.value)}
+                        className="w-full px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40 font-mono"
+                      />
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.01"
+                        placeholder="e.g. 6"
+                        value={row.widthIn}
+                        onChange={(e) => updateBoardRow(row.id, 'widthIn', e.target.value)}
+                        className="w-full px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40 font-mono"
+                      />
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.01"
+                        placeholder="e.g. 1.5"
+                        value={row.thicknessIn}
+                        onChange={(e) => updateBoardRow(row.id, 'thicknessIn', e.target.value)}
+                        className="w-full px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40 font-mono"
+                      />
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        placeholder="e.g. 12"
+                        value={row.quantity}
+                        onChange={(e) => updateBoardRow(row.id, 'quantity', e.target.value)}
+                        className="w-full px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40 font-mono"
+                      />
+                      <button
+                        type="button"
+                        disabled={boardRows.length <= 1}
+                        onClick={() => removeBoardRow(row.id)}
+                        className="text-fog hover:text-rust disabled:opacity-30 disabled:hover:text-fog p-1 text-base leading-none font-bold inline-flex items-center justify-center cursor-pointer"
+                        title="Remove board row"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={addBoardRow}
+                className="px-3 py-1.5 border border-charcoal/20 rounded-lg text-xs font-semibold text-charcoal hover:bg-sawdust/60 transition-colors cursor-pointer"
+              >
+                + Add Board Size
+              </button>
+
+              {completeWarning.show && (
+                <div className="p-3 bg-[#F6E4AE]/40 text-[#6B4E13] border border-[#F6E4AE] rounded-lg text-xs leading-relaxed space-y-2">
+                  <p>{completeWarning.message}</p>
+                  <label className="flex items-start gap-2 font-semibold cursor-pointer text-[#6B4E13]">
+                    <input
+                      type="checkbox"
+                      checked={completeWarning.acknowledged}
+                      onChange={(e) =>
+                        setCompleteWarning((prev) => ({ ...prev, acknowledged: e.target.checked }))
+                      }
+                      className="mt-0.5 accent-heartwood"
+                    />
+                    <span>I've checked the figures and want to complete this job anyway.</span>
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-charcoal/10">
+              <button
+                type="button"
+                onClick={closeCompleteModal}
+                disabled={completeSubmitting}
+                className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitCompleteJob}
+                disabled={completeSubmitting || (completeWarning.show && !completeWarning.acknowledged)}
+                className="px-4 py-2 bg-charcoal hover:bg-heartwood text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {completeSubmitting
+                  ? 'Completing…'
+                  : completeWarning.show
+                  ? 'Confirm & Mark Complete'
+                  : 'Mark Complete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
