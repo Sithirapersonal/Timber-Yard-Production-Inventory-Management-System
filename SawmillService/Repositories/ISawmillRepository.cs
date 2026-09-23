@@ -1,3 +1,4 @@
+using SawmillService.DTOs;
 using SawmillService.Models;
 
 namespace SawmillService.Repositories;
@@ -29,6 +30,12 @@ public interface ISawmillRepository
     // Saw-job reads
     Task<IEnumerable<SawJob>> GetRecentJobsAsync(int limit = 20);
     Task<SawJob?> GetJobByIdAsync(int sawJobId);
+
+    // Wastage & yield report (Completed jobs only, bounded by CompletedAt)
+    // from/to are inclusive date bounds on CompletedAt, both optional (null = unbounded).
+    // A non-null 'to' provided as a date is treated as END-OF-DAY: a job completed
+    // anytime on that calendar day is included.
+    Task<WastageYieldReportDto> GetWastageYieldReportAsync(DateTime? from, DateTime? to);
 
     // Job completion & revert
     Task<bool> CompleteSawJobAsync(int sawJobId, decimal outputVolumeM3, decimal wastageM3);

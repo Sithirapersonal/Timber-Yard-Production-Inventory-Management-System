@@ -368,8 +368,57 @@ public class SawmillController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // GET api/Sawmill/jobs/wastage-yield-report?from=YYYY-MM-DD&to=YYYY-MM-DD
+    // Wastage & Yield Report over completed saw jobs, filtered by the date each
+    // job was Completed (CompletedAt). Management-facing analytics — Admin and
+    // Manager only, deliberately distinct from the operational roles used for
+    // starting/completing/reverting jobs.
+    // Both bounds are optional: omit either for an unbounded side, omit both for
+    // every completed job. A 'to' date is treated as end-of-day inclusive.
+    // All totals and percentages are computed server-side in the repository.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpGet("jobs/wastage-yield-report")]
+    [Authorize(Roles = "Admin,Manager")]
+    public async Task<IActionResult> GetWastageYieldReport(
+        [FromQuery] string? from = null,
+        [FromQuery] string? to = null)
+    {
+        if (!TryParseReportDate(from, out var fromDate))
+            return BadRequest(new { message = "Invalid 'from' date. Use YYYY-MM-DD." });
+
+        if (!TryParseReportDate(to, out var toDate))
+            return BadRequest(new { message = "Invalid 'to' date. Use YYYY-MM-DD." });
+
+        var report = await _repository.GetWastageYieldReportAsync(fromDate, toDate);
+        return Ok(report);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Parses an optional YYYY-MM-DD query value into a UTC-midnight DateTime.
+    /// Empty/null is valid and means "unbounded" (value = null). The repository
+    /// treats a non-null 'to' as end-of-day inclusive on that calendar day.
+    /// </summary>
+    private static bool TryParseReportDate(string? raw, out DateTime? value)
+    {
+        value = null;
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+
+        if (DateTime.TryParseExact(
+                raw.Trim(),
+                "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var parsed))
+        {
+            value = parsed;
+            return true;
+        }
+        return false;
+    }
 
     /// <summary>Extracts the raw Bearer token string from the Authorization header.</summary>
     private string? ExtractBearerToken()

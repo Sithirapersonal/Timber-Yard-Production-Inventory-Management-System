@@ -1,4 +1,5 @@
 using MySql.Data.MySqlClient;
+using SawmillService.DTOs;
 using SawmillService.Models;
 
 namespace SawmillService.Repositories;
@@ -283,7 +284,7 @@ public class SawmillRepository : ISawmillRepository
         var sql = $@"
             SELECT SawJobId, JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3,
                    Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName,
-                   OutputVolumeM3, WastageM3
+                   OutputVolumeM3, WastageM3, CompletedAt
             FROM SawJobs
             ORDER BY StartedAt DESC
             LIMIT {limit};";
@@ -309,7 +310,8 @@ public class SawmillRepository : ISawmillRepository
                     MachineCode = reader.IsDBNull(reader.GetOrdinal("MachineCode")) ? "" : reader.GetString(reader.GetOrdinal("MachineCode")),
                     MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName")),
                     OutputVolumeM3 = reader.IsDBNull(reader.GetOrdinal("OutputVolumeM3")) ? null : reader.GetDecimal(reader.GetOrdinal("OutputVolumeM3")),
-                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3"))
+                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3")),
+                    CompletedAt = reader.IsDBNull(reader.GetOrdinal("CompletedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("CompletedAt"))
                 });
             }
         }
@@ -370,7 +372,7 @@ public class SawmillRepository : ISawmillRepository
         const string sql = @"
             SELECT SawJobId, JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3,
                    Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName,
-                   OutputVolumeM3, WastageM3
+                   OutputVolumeM3, WastageM3, CompletedAt
             FROM SawJobs
             WHERE SawJobId = @SawJobId;";
 
@@ -397,7 +399,8 @@ public class SawmillRepository : ISawmillRepository
                     MachineCode = reader.IsDBNull(reader.GetOrdinal("MachineCode")) ? "" : reader.GetString(reader.GetOrdinal("MachineCode")),
                     MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName")),
                     OutputVolumeM3 = reader.IsDBNull(reader.GetOrdinal("OutputVolumeM3")) ? null : reader.GetDecimal(reader.GetOrdinal("OutputVolumeM3")),
-                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3"))
+                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3")),
+                    CompletedAt = reader.IsDBNull(reader.GetOrdinal("CompletedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("CompletedAt"))
                 };
             }
         }
@@ -433,7 +436,8 @@ public class SawmillRepository : ISawmillRepository
 
         const string sql = @"
             UPDATE SawJobs
-            SET Status = 'Completed', OutputVolumeM3 = @OutputVolumeM3, WastageM3 = @WastageM3
+            SET Status = 'Completed', OutputVolumeM3 = @OutputVolumeM3, WastageM3 = @WastageM3,
+                CompletedAt = UTC_TIMESTAMP()
             WHERE SawJobId = @SawJobId AND Status = 'InProgress';";
 
         await using var cmd = new MySqlCommand(sql, connection);
@@ -451,13 +455,102 @@ public class SawmillRepository : ISawmillRepository
 
         const string sql = @"
             UPDATE SawJobs
-            SET Status = 'InProgress', OutputVolumeM3 = NULL, WastageM3 = NULL
+            SET Status = 'InProgress', OutputVolumeM3 = NULL, WastageM3 = NULL, CompletedAt = NULL
             WHERE SawJobId = @SawJobId AND Status IN ('Completed', 'Cancelled');";
 
         await using var cmd = new MySqlCommand(sql, connection);
         cmd.Parameters.AddWithValue("@SawJobId", sawJobId);
 
         return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Wastage & Yield Report (Admin/Manager analytics — completed jobs only)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public async Task<WastageYieldReportDto> GetWastageYieldReportAsync(DateTime? from, DateTime? to)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        // "to" is an inclusive calendar day: expand midnight → following midnight
+        // so the comparison uses an exclusive upper bound (`<`) and therefore
+        // catches every timestamp completed anywhere on that day.
+        var toExclusive = to.HasValue ? to.Value.Date.AddDays(1) : (DateTime?)null;
+
+        var sql = @"
+            SELECT JobCode, SpeciesName, CompletedAt, TotalVolumeM3,
+                   COALESCE(OutputVolumeM3, 0) AS YieldVolumeM3,
+                   COALESCE(WastageM3, 0)      AS WastageVolumeM3
+            FROM SawJobs
+            WHERE Status = 'Completed' AND CompletedAt IS NOT NULL";
+
+        // Both bounds optional — omit either for an unbounded side, omit both
+        // for every completed job.
+        if (from.HasValue) sql += "\n            AND CompletedAt >= @From";
+        if (toExclusive.HasValue) sql += "\n            AND CompletedAt < @ToExclusive";
+
+        sql += "\n            ORDER BY CompletedAt DESC;";
+
+        var jobs = new List<JobWastageYieldDto>();
+        await using (var cmd = new MySqlCommand(sql, connection))
+        {
+            if (from.HasValue) cmd.Parameters.AddWithValue("@From", from.Value.Date);
+            if (toExclusive.HasValue) cmd.Parameters.AddWithValue("@ToExclusive", toExclusive.Value);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var inputVolumeM3 = reader.GetDecimal(reader.GetOrdinal("TotalVolumeM3"));
+                var yieldVolumeM3 = reader.GetDecimal(reader.GetOrdinal("YieldVolumeM3"));
+                var wastageVolumeM3 = reader.GetDecimal(reader.GetOrdinal("WastageVolumeM3"));
+
+                jobs.Add(new JobWastageYieldDto
+                {
+                    JobCode = reader.GetString(reader.GetOrdinal("JobCode")),
+                    SpeciesName = reader.GetString(reader.GetOrdinal("SpeciesName")),
+                    CompletedAt = reader.GetDateTime(reader.GetOrdinal("CompletedAt")),
+                    InputVolumeM3 = inputVolumeM3,
+                    YieldVolumeM3 = yieldVolumeM3,
+                    WastageVolumeM3 = wastageVolumeM3,
+                    WastagePercentage = RatioPercentage(wastageVolumeM3, inputVolumeM3)
+                });
+            }
+        }
+
+        // ── Overall totals (all percentages computed server-side) ─────────────
+        var totals = new WastageYieldTotalsDto
+        {
+            CompletedJobCount = jobs.Count,
+            TotalInputVolumeM3 = jobs.Sum(j => j.InputVolumeM3),
+            TotalYieldVolumeM3 = jobs.Sum(j => j.YieldVolumeM3),
+            TotalWastageVolumeM3 = jobs.Sum(j => j.WastageVolumeM3)
+        };
+        totals.RecoveryPercentage = RatioPercentage(totals.TotalYieldVolumeM3, totals.TotalInputVolumeM3);
+        totals.WastagePercentage = RatioPercentage(totals.TotalWastageVolumeM3, totals.TotalInputVolumeM3);
+
+        // ── Per-species breakdown, largest contributor first ──────────────────
+        var speciesBreakdown = jobs
+            .GroupBy(j => j.SpeciesName)
+            .Select(g => new SpeciesWastageYieldDto
+            {
+                SpeciesName = g.Key,
+                CompletedJobCount = g.Count(),
+                InputVolumeM3 = g.Sum(j => j.InputVolumeM3),
+                YieldVolumeM3 = g.Sum(j => j.YieldVolumeM3),
+                WastageVolumeM3 = g.Sum(j => j.WastageVolumeM3),
+                RecoveryPercentage = RatioPercentage(g.Sum(j => j.YieldVolumeM3), g.Sum(j => j.InputVolumeM3))
+            })
+            .OrderByDescending(s => s.InputVolumeM3)
+            .ThenBy(s => s.SpeciesName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new WastageYieldReportDto
+        {
+            Totals = totals,
+            SpeciesBreakdown = speciesBreakdown,
+            Jobs = jobs
+        };
     }
 
     public async Task<bool> IsMachineInUseAsync(int machineId, int excludeSawJobId)
@@ -508,6 +601,15 @@ public class SawmillRepository : ISawmillRepository
     // ─────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// part/whole expressed as a percentage rounded to 1 decimal place
+    /// (AwayFromZero, matching the service's other rounding). Returns 0 when
+    /// whole is &lt;= 0 so an empty report yields clean zeros instead of
+    /// NaN/Infinity — also guards per-row division by zero.
+    /// </summary>
+    private static decimal RatioPercentage(decimal part, decimal whole)
+        => whole > 0m ? Math.Round(part / whole * 100m, 1, MidpointRounding.AwayFromZero) : 0m;
 
     private static Worker MapWorker(System.Data.Common.DbDataReader reader) => new()
     {

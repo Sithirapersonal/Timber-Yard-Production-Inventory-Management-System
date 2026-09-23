@@ -30,6 +30,13 @@ public class SawJob
     public decimal? OutputVolumeM3 { get; set; }
     public decimal? WastageM3 { get; set; }
 
+    /// <summary>When the job was marked Completed (UTC). Written by the Complete
+    /// update (UTC_TIMESTAMP), cleared back to NULL on revert — matching how
+    /// OutputVolumeM3/WastageM3 are cleared. Null while the job is
+    /// InProgress/Cancelled, or for Completed rows that predate this column.
+    /// </summary>
+    public DateTime? CompletedAt { get; set; }
+
     // Populated for list/detail views — not stored in DB
     public List<string> AssignedWorkerNames { get; set; } = new();
     public List<SawJobLogAllocation> AllocatedLogs { get; set; } = new();

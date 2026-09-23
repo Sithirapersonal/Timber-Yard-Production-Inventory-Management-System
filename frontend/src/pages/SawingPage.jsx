@@ -6,12 +6,16 @@ import Card from '../components/ui/Card';
 import RoleBadge from '../components/ui/RoleBadge';
 import StockOverviewTab from '../components/sawmill/StockOverviewTab';
 import StartJobTab from '../components/sawmill/StartJobTab';
+import WastageYieldReportTab from '../components/sawmill/WastageYieldReportTab';
 
 const API_BASE_URL = import.meta.env.VITE_SAWMILL_API_URL || 'http://localhost:5210/api/Sawmill';
 
 export default function SawingPage() {
   const { user } = useAuth();
   const canWrite = ['Admin', 'Manager', 'Supervisor'].includes(user?.role);
+  // Management-facing analytics — Admin/Manager only, deliberately distinct from
+  // canWrite (which also includes Supervisor). Keep the two concepts separate.
+  const canViewWastageYieldReport = ['Admin', 'Manager'].includes(user?.role);
 
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('overview');
@@ -138,6 +142,7 @@ export default function SawingPage() {
           {[
             { id: 'overview', label: 'Stock Overview' },
             { id: 'start',    label: '+ Start Saw Job', hidden: !canWrite },
+            { id: 'report',   label: 'Wastage & Yield Report', hidden: !canViewWastageYieldReport },
           ]
             .filter(t => !t.hidden)
             .map(tab => (
@@ -187,6 +192,19 @@ export default function SawingPage() {
             <p className="text-sm text-fog">
               Your role (<strong>{user?.role}</strong>) does not have permission to start saw jobs.
               Contact an Admin, Manager, or Supervisor.
+            </p>
+          </Card>
+        )}
+
+        {activeTab === 'report' && canViewWastageYieldReport && (
+          <WastageYieldReportTab apiBaseUrl={API_BASE_URL} />
+        )}
+
+        {activeTab === 'report' && !canViewWastageYieldReport && (
+          <Card className="p-6">
+            <p className="text-sm text-fog">
+              Your role (<strong>{user?.role}</strong>) does not have permission to view the
+              Wastage &amp; Yield Report. This report is restricted to Admin and Manager roles.
             </p>
           </Card>
         )}

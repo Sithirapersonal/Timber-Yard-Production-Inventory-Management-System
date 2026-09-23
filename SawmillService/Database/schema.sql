@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS Machines (
 --    SpeciesName / LengthFt are denormalized snapshots taken at job-creation time.
 --    MachineCode / MachineName are denormalized snapshots of the allocated machine.
 --    TotalVolumeM3 is computed server-side (sum of allocated logs' VolumeM3).
+--    CompletedAt records when the job was marked Completed (UTC); NULL until then.
 --    JobCode is generated server-side as SAW-001, SAW-002, ...
 CREATE TABLE IF NOT EXISTS SawJobs (
     SawJobId     INT AUTO_INCREMENT PRIMARY KEY,
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS SawJobs (
     MachineName  VARCHAR(100) NOT NULL,
     OutputVolumeM3 DECIMAL(10,4) NULL,   -- total sawn board volume, computed server-side, set only on Complete
     WastageM3    DECIMAL(10,4) NULL,   -- TotalVolumeM3 - OutputVolumeM3, computed server-side, set only on Complete
+    CompletedAt  DATETIME NULL,        -- when the job was marked Completed (UTC), set only on Complete, cleared on revert
     CONSTRAINT fk_sawjobs_machine FOREIGN KEY (MachineId) REFERENCES Machines(MachineId)
 );
 
