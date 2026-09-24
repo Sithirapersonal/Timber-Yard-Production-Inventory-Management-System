@@ -79,6 +79,11 @@ var kafkaBootstrapServers = builder.Configuration["Kafka:BootstrapServers"] ?? "
 var kafkaTopic = builder.Configuration["Kafka:Topic"] ?? "raw-stock-reversed";
 builder.Services.AddSingleton(new KafkaProducerService(kafkaBootstrapServers, kafkaTopic));
 
+// Kafka producer for logs-consumed events (job started -> allocated logs flipped to
+// Consumed by LogIntakeService). Same singleton pattern as the reversal producer.
+var logsConsumedTopic = builder.Configuration["Kafka:LogsConsumedTopic"] ?? "logs-consumed";
+builder.Services.AddSingleton(new LogsConsumedProducerService(kafkaBootstrapServers, logsConsumedTopic));
+
 // CORS — same AllowFrontend policy as LogIntakeService (any origin/header/method)
 builder.Services.AddCors(options =>
 {

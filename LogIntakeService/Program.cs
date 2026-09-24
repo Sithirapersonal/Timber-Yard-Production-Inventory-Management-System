@@ -58,10 +58,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<ILogIntakeRepository, LogIntakeRepository>();
 
-// Background Kafka consumer that reverts a cancelled job's logs back to InStock.
-// Registered as a hosted service; it retries its own connection with backoff and
-// never takes the rest of the service down.
+// Background Kafka consumers that keep LogIntakeService's Logs status in sync with
+// SawmillService: RawStockReversedConsumer reverts a cancelled job's logs back to
+// InStock; LogsConsumedConsumer flips a started job's allocated logs to Consumed.
+// Registered as hosted services; they retry their own connections with backoff and
+// never take the rest of the service down.
 builder.Services.AddHostedService<RawStockReversedConsumer>();
+builder.Services.AddHostedService<LogsConsumedConsumer>();
 
 builder.Services.AddCors(options =>
 {

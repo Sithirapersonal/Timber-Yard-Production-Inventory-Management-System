@@ -19,17 +19,20 @@ public class SawmillControllerCancelJobTests
 
     private readonly Mock<ISawmillRepository> _repo;
     private readonly Mock<KafkaProducerService> _producer;
+    private readonly Mock<LogsConsumedProducerService> _logsConsumedProducer;
     private readonly SawmillController _controller;
 
     public SawmillControllerCancelJobTests()
     {
         _repo = new Mock<ISawmillRepository>();
         _producer = new Mock<KafkaProducerService>("localhost:9092", "raw-stock-reversed");
+        _logsConsumedProducer = new Mock<LogsConsumedProducerService>("localhost:9092", "logs-consumed");
 
         _controller = new SawmillController(
             _repo.Object,
             new LogIntakeClient(new HttpClient(), NullLogger<LogIntakeClient>.Instance),
             _producer.Object,
+            _logsConsumedProducer.Object,
             NullLogger<SawmillController>.Instance);
 
         // Mount a ClaimsPrincipal carrying a userId claim, mirroring how the JWT

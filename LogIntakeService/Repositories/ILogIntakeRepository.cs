@@ -37,4 +37,16 @@ public interface ILogIntakeRepository
     /// Called by the raw-stock-reversed consumer after a saw job is cancelled.
     /// </summary>
     Task<int> ReleaseLogsAsync(IEnumerable<int> logIds);
+
+    /// <summary>
+    /// Marks all supplied LogIds as 'Consumed' where they are currently 'InStock' in a
+    /// single DB transaction. Deliberately tolerant of partial state (NOT all-or-nothing,
+    /// unlike ConsumeLogsAsync): Kafka can redeliver the same event, and by the time it
+    /// is processed some logs may already be Consumed (prior delivery) or in some other
+    /// state (Removed/absent). Those are simply not matched — a second delivery updates
+    /// 0 rows harmlessly. Returns the number of rows actually updated — callers log
+    /// (don't throw) when it differs from the request.
+    /// Called by the logs-consumed consumer after a saw job is started.
+    /// </summary>
+    Task<int> MarkLogsConsumedAsync(IEnumerable<int> logIds);
 }

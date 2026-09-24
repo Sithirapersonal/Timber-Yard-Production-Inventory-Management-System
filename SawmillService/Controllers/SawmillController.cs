@@ -16,17 +16,20 @@ public class SawmillController : ControllerBase
     private readonly ISawmillRepository _repository;
     private readonly LogIntakeClient _logIntakeClient;
     private readonly KafkaProducerService _kafkaProducer;
+    private readonly LogsConsumedProducerService _logsConsumedProducer;
     private readonly ILogger<SawmillController> _logger;
 
     public SawmillController(
         ISawmillRepository repository,
         LogIntakeClient logIntakeClient,
         KafkaProducerService kafkaProducer,
+        LogsConsumedProducerService logsConsumedProducer,
         ILogger<SawmillController> logger)
     {
         _repository = repository;
         _logIntakeClient = logIntakeClient;
         _kafkaProducer = kafkaProducer;
+        _logsConsumedProducer = logsConsumedProducer;
         _logger = logger;
     }
 
@@ -110,8 +113,10 @@ public class SawmillController : ControllerBase
 
     // ─────────────────────────────────────────────────────────────────────────
     // POST api/Sawmill/jobs
-    // Starts a saw job: validates, computes volume, writes DB, marks logs Consumed.
-    // If the LogIntakeService consume call fails, the local insert is rolled back.
+    // Starts a saw job: validates, computes volume, writes DB, then publishes a
+    // logs-consumed event to Kafka so LogIntakeService flips the allocated logs
+    // to Consumed asynchronously (fire-and-forget — a publish failure never fails
+    // this request or rolls back the job; the logs simply stay InStock).
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("jobs")]
     [Authorize(Roles = "Admin,Manager,Supervisor")]
@@ -217,37 +222,44 @@ public class SawmillController : ControllerBase
             return StatusCode(500, new { message = "Failed to create saw job. Please retry." });
         }
 
-        // ── Mark logs Consumed in LogIntakeService ─────────────────────────
-        // If this fails, we roll back the local rows by cancelling the job immediately.
-        (bool success, string? errorMsg) consumeResult;
-        try
+        // ── Publish logs-consumed event to LogIntakeService ────────────────
+        // Fire-and-forget, matching the cancel/reversal flow: the job is already
+        // committed in SawmillDB, so a publish failure must not fail this request or
+        // roll anything back. The publish runs on a detached background task so the
+        // HTTP response never waits on Kafka — even an unreachable broker (delivery
+        // timeout up to message.timeout.ms, 5 minutes by default) must not delay the
+        // 201. Captures are safe here: LogsConsumedProducerService and ILogger<T> are
+        // both container-managed singletons (not scoped), and evt is a plain value
+        // object — no request-scoped service is touched by the background task.
+        // LogIntakeService's LogsConsumedConsumer applies the InStock -> Consumed
+        // transition asynchronously from the Kafka event.
+        var evt = new LogsConsumedEvent
         {
-            consumeResult = await _logIntakeClient.ConsumeLogsAsync(token, dto.LogIds);
-        }
-        catch (LogIntakeServiceException ex)
-        {
-            // Roll back by cancelling the local job
-            await _repository.CancelJobAsync(createdJob.SawJobId);
-            _logger.LogError(ex, "LogIntakeService unreachable during consume; local job {JobId} cancelled", createdJob.SawJobId);
-            return StatusCode(502, new
-            {
-                message = "Saw job could not be completed: LogIntakeService is unreachable. " +
-                          "The job has been cancelled. Please retry."
-            });
-        }
+            SawJobId = createdJob.SawJobId,
+            Logs = logAllocations
+                .Select(l => new LogsConsumedEvent.LogEntry { LogId = l.LogId, VolumeM3 = l.VolumeM3 })
+                .ToList(),
+            StartedBy = startedBy,
+            StartedAt = DateTime.UtcNow
+        };
 
-        if (!consumeResult.success)
+        // Deliberately not awaited: the job is already committed, so the publish is
+        // a background concern. Task.Run keeps it off the request path entirely.
+        _ = Task.Run(async () =>
         {
-            // Roll back by cancelling the local job
-            await _repository.CancelJobAsync(createdJob.SawJobId);
-            _logger.LogWarning("LogIntakeService refused consume for job {JobId}; local job cancelled", createdJob.SawJobId);
-            return StatusCode(409, new
+            try
             {
-                message = "LogIntakeService refused to mark the selected logs as Consumed " +
-                          "(they may have already been consumed or removed). " +
-                          "The job has been cancelled. Please refresh and retry."
-            });
-        }
+                await _logsConsumedProducer.PublishLogsConsumedAsync(evt);
+            }
+            catch (Exception ex)
+            {
+                // Job stays InProgress with stock not yet decremented — that is the
+                // agreed tradeoff for the fire-and-forget flow. Log and continue.
+                _logger.LogError(ex,
+                    "Failed to publish LogsConsumedEvent for started job {SawJobId}; allocated logs will not be auto-marked Consumed",
+                    createdJob.SawJobId);
+            }
+        });
 
         createdJob.AssignedWorkerNames = workers.Select(w => $"{w.FullName} ({w.EmployeeCode})").ToList();
 

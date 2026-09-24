@@ -180,94 +180,114 @@ public class SawmillRepository : ISawmillRepository
         var logList = logs.ToList();
         var workerList = workerIds.ToList();
 
-        await using var connection = new MySqlConnection(_connectionString);
-        await connection.OpenAsync();
-        await using var transaction = await connection.BeginTransactionAsync();
+        // JobCode is derived from MAX(SawJobId)+1 with no locking, so two concurrent
+        // starts can compute the same code; the UNIQUE(JobCode) constraint then rejects
+        // the loser with MySQL error 1062 (ER_DUP_ENTRY). Retry with a freshly computed
+        // code, bounded, instead of surfacing a 500 (the failed attempt is fully rolled
+        // back, so no partial rows survive).
+        const int maxAttempts = 3;
 
-        try
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var jobCode = await GenerateNextJobCodeInternalAsync(connection, (MySqlTransaction)transaction);
+            await using var connection = new MySqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
 
-            // 1. Insert SawJob
-            const string jobSql = @"
-                INSERT INTO SawJobs (JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3, Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName)
-                VALUES (@JobCode, @StockId, @SpeciesName, @LengthFt, @TotalVolumeM3, @Notes, 'InProgress', @StartedBy, UTC_TIMESTAMP(), @MachineId, @MachineCode, @MachineName);
-                SELECT LAST_INSERT_ID();";
-
-            int sawJobId;
-            await using (var jobCmd = new MySqlCommand(jobSql, connection, (MySqlTransaction)transaction))
+            try
             {
-                jobCmd.Parameters.AddWithValue("@JobCode", jobCode);
-                jobCmd.Parameters.AddWithValue("@StockId", stockId);
-                jobCmd.Parameters.AddWithValue("@SpeciesName", speciesName);
-                jobCmd.Parameters.AddWithValue("@LengthFt", lengthFt);
-                jobCmd.Parameters.AddWithValue("@TotalVolumeM3", totalVolumeM3);
-                jobCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
-                jobCmd.Parameters.AddWithValue("@StartedBy", startedBy);
-                jobCmd.Parameters.AddWithValue("@MachineId", machineId);
-                jobCmd.Parameters.AddWithValue("@MachineCode", machineCode);
-                jobCmd.Parameters.AddWithValue("@MachineName", machineName);
-                sawJobId = Convert.ToInt32(await jobCmd.ExecuteScalarAsync());
-            }
+                var jobCode = await GenerateNextJobCodeInternalAsync(connection, (MySqlTransaction)transaction);
 
-            // 2. Insert SawJobLogs rows (one per allocated log)
-            const string logSql = @"
-                INSERT INTO SawJobLogs (SawJobId, LogId, VolumeM3)
-                VALUES (@SawJobId, @LogId, @VolumeM3);";
+                // 1. Insert SawJob
+                const string jobSql = @"
+                    INSERT INTO SawJobs (JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3, Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName)
+                    VALUES (@JobCode, @StockId, @SpeciesName, @LengthFt, @TotalVolumeM3, @Notes, 'InProgress', @StartedBy, UTC_TIMESTAMP(), @MachineId, @MachineCode, @MachineName);
+                    SELECT LAST_INSERT_ID();";
 
-            foreach (var (logId, volumeM3) in logList)
-            {
-                await using var logCmd = new MySqlCommand(logSql, connection, (MySqlTransaction)transaction);
-                logCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
-                logCmd.Parameters.AddWithValue("@LogId", logId);
-                logCmd.Parameters.AddWithValue("@VolumeM3", volumeM3);
-                await logCmd.ExecuteNonQueryAsync();
-            }
+                int sawJobId;
+                await using (var jobCmd = new MySqlCommand(jobSql, connection, (MySqlTransaction)transaction))
+                {
+                    jobCmd.Parameters.AddWithValue("@JobCode", jobCode);
+                    jobCmd.Parameters.AddWithValue("@StockId", stockId);
+                    jobCmd.Parameters.AddWithValue("@SpeciesName", speciesName);
+                    jobCmd.Parameters.AddWithValue("@LengthFt", lengthFt);
+                    jobCmd.Parameters.AddWithValue("@TotalVolumeM3", totalVolumeM3);
+                    jobCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
+                    jobCmd.Parameters.AddWithValue("@StartedBy", startedBy);
+                    jobCmd.Parameters.AddWithValue("@MachineId", machineId);
+                    jobCmd.Parameters.AddWithValue("@MachineCode", machineCode);
+                    jobCmd.Parameters.AddWithValue("@MachineName", machineName);
+                    sawJobId = Convert.ToInt32(await jobCmd.ExecuteScalarAsync());
+                }
 
-            // 3. Insert SawJobWorkers rows (many-to-many)
-            const string workerSql = @"
-                INSERT INTO SawJobWorkers (SawJobId, WorkerId)
-                VALUES (@SawJobId, @WorkerId);";
+                // 2. Insert SawJobLogs rows (one per allocated log)
+                const string logSql = @"
+                    INSERT INTO SawJobLogs (SawJobId, LogId, VolumeM3)
+                    VALUES (@SawJobId, @LogId, @VolumeM3);";
 
-            foreach (var workerId in workerList)
-            {
-                await using var workerCmd = new MySqlCommand(workerSql, connection, (MySqlTransaction)transaction);
-                workerCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
-                workerCmd.Parameters.AddWithValue("@WorkerId", workerId);
-                await workerCmd.ExecuteNonQueryAsync();
-            }
+                foreach (var (logId, volumeM3) in logList)
+                {
+                    await using var logCmd = new MySqlCommand(logSql, connection, (MySqlTransaction)transaction);
+                    logCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+                    logCmd.Parameters.AddWithValue("@LogId", logId);
+                    logCmd.Parameters.AddWithValue("@VolumeM3", volumeM3);
+                    await logCmd.ExecuteNonQueryAsync();
+                }
 
-            await transaction.CommitAsync();
+                // 3. Insert SawJobWorkers rows (many-to-many)
+                const string workerSql = @"
+                    INSERT INTO SawJobWorkers (SawJobId, WorkerId)
+                    VALUES (@SawJobId, @WorkerId);";
 
-            // Return a populated SawJob object to the controller
-            return new SawJob
-            {
-                SawJobId = sawJobId,
-                JobCode = jobCode,
-                StockId = stockId,
-                SpeciesName = speciesName,
-                LengthFt = lengthFt,
-                TotalVolumeM3 = totalVolumeM3,
-                Notes = notes,
-                Status = "InProgress",
-                StartedBy = startedBy,
-                StartedAt = DateTime.UtcNow,
-                MachineId = machineId,
-                MachineCode = machineCode,
-                MachineName = machineName,
-                AllocatedLogs = logList.Select(l => new SawJobLogAllocation
+                foreach (var workerId in workerList)
+                {
+                    await using var workerCmd = new MySqlCommand(workerSql, connection, (MySqlTransaction)transaction);
+                    workerCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+                    workerCmd.Parameters.AddWithValue("@WorkerId", workerId);
+                    await workerCmd.ExecuteNonQueryAsync();
+                }
+
+                await transaction.CommitAsync();
+
+                // Return a populated SawJob object to the controller
+                return new SawJob
                 {
                     SawJobId = sawJobId,
-                    LogId = l.LogId,
-                    VolumeM3 = l.VolumeM3
-                }).ToList()
-            };
+                    JobCode = jobCode,
+                    StockId = stockId,
+                    SpeciesName = speciesName,
+                    LengthFt = lengthFt,
+                    TotalVolumeM3 = totalVolumeM3,
+                    Notes = notes,
+                    Status = "InProgress",
+                    StartedBy = startedBy,
+                    StartedAt = DateTime.UtcNow,
+                    MachineId = machineId,
+                    MachineCode = machineCode,
+                    MachineName = machineName,
+                    AllocatedLogs = logList.Select(l => new SawJobLogAllocation
+                    {
+                        SawJobId = sawJobId,
+                        LogId = l.LogId,
+                        VolumeM3 = l.VolumeM3
+                    }).ToList()
+                };
+            }
+            catch (MySqlException ex) when (ex.Number == 1062 && attempt < maxAttempts)
+            {
+                // Duplicate JobCode under concurrency: the failed transaction was fully
+                // rolled back (no partial rows). Discard this attempt and retry with a
+                // freshly computed JobCode. Any other exception falls through to the
+                // catch below and is rethrown immediately.
+                await transaction.RollbackAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
+
+        throw new InvalidOperationException("Could not allocate a unique JobCode after retries.");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
