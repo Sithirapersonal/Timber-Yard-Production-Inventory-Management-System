@@ -27,4 +27,14 @@ public interface ILogIntakeRepository
     /// Called by SawmillService via PUT /api/LogIntake/logs/consume.
     /// </summary>
     Task<bool> ConsumeLogsAsync(IEnumerable<int> logIds);
+
+    /// <summary>
+    /// Flips all supplied LogIds from 'Consumed' back to 'InStock' in a single
+    /// DB transaction. Deliberately tolerant of partial state (NOT all-or-nothing):
+    /// logs that are already InStock, Removed, or absent are simply not matched, so a
+    /// re-delivered Kafka event harmlessly updates 0 rows. Returns the number of rows
+    /// actually updated — callers log (don't throw) when it differs from the request.
+    /// Called by the raw-stock-reversed consumer after a saw job is cancelled.
+    /// </summary>
+    Task<int> ReleaseLogsAsync(IEnumerable<int> logIds);
 }

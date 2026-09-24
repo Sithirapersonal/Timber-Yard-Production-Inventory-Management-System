@@ -572,14 +572,45 @@ public class SawmillRepository : ISawmillRepository
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Cancel Job (Admin only)
-    // Decision: logs are NOT reverted to InStock on cancellation.
-    // Rationale: once logs enter the sawmill, they have been physically moved
-    // on the shop floor; reverting them to InStock could create a phantom count
-    // for stock that is no longer in the yard or is in an indeterminate state.
-    // An Admin who genuinely wants to restore a log should use LogIntakeService
-    // directly (future RestoreLog endpoint). This matches the principle of
-    // keeping SawmillService's cancel as a status flag only.
+    // Log allocations
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the logs allocated to a job (SawJobLogs rows). Used after cancelling
+    /// a job so a raw-stock-reversed event can be published listing every LogId that
+    /// LogIntakeService should flip back to InStock. LogId is a value-only reference
+    /// to LogIntakeService's Logs table — no cross-DB FK.
+    /// </summary>
+    public async Task<IEnumerable<SawJobLogAllocation>> GetLogAllocationsForJobAsync(int sawJobId)
+    {
+        var allocations = new List<SawJobLogAllocation>();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            SELECT SawJobLogId, SawJobId, LogId, VolumeM3
+            FROM SawJobLogs
+            WHERE SawJobId = @SawJobId
+            ORDER BY SawJobLogId;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            allocations.Add(MapSawJobLogAllocation(reader));
+        }
+        return allocations;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Cancel Job (Admin, Manager, Supervisor — enforced by the controller).
+    // Marks an InProgress job Cancelled. After the DB cancel the controller
+    // publishes a raw-stock-reversed event (fire-and-forget) so LogIntakeService
+    // can flip the job's allocated logs back to InStock. Because the reversal is
+    // asynchronous there is a short window where the logs may still show Consumed,
+    // and a Kafka publish failure means they stay Consumed — an accepted tradeoff.
     // ─────────────────────────────────────────────────────────────────────────
 
     public async Task<bool> CancelJobAsync(int sawJobId)
@@ -628,5 +659,13 @@ public class SawmillRepository : ISawmillRepository
         Name = reader.GetString(reader.GetOrdinal("Name")),
         Status = reader.GetString(reader.GetOrdinal("Status")),
         CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"))
+    };
+
+    private static SawJobLogAllocation MapSawJobLogAllocation(System.Data.Common.DbDataReader reader) => new()
+    {
+        SawJobLogId = reader.GetInt32(reader.GetOrdinal("SawJobLogId")),
+        SawJobId = reader.GetInt32(reader.GetOrdinal("SawJobId")),
+        LogId = reader.GetInt32(reader.GetOrdinal("LogId")),
+        VolumeM3 = reader.GetDecimal(reader.GetOrdinal("VolumeM3"))
     };
 }

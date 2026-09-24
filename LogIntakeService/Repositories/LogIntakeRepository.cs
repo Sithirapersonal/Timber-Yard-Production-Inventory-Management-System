@@ -548,4 +548,49 @@ public class LogIntakeRepository : ILogIntakeRepository
             throw;
         }
     }
+
+    /// <summary>
+    /// Marks all supplied LogIds as 'InStock' where they are currently 'Consumed'.
+    /// Deliberately NOT all-or-nothing: Kafka can redeliver the same event, and by the
+    /// time it is processed some logs may already be InStock (prior delivery) or in some
+    /// other state (Removed/absent). Those are simply not matched — a second delivery
+    /// updates 0 rows harmlessly. Returns rows affected so the caller can log the
+    /// difference as useful signal rather than an error.
+    /// </summary>
+    public async Task<int> ReleaseLogsAsync(IEnumerable<int> logIds)
+    {
+        var idList = logIds.ToList();
+        if (idList.Count == 0) return 0;
+
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            var paramNames = idList.Select((_, i) => $"@lid{i}").ToArray();
+            var updateSql = $@"
+                UPDATE Logs
+                SET Status = 'InStock'
+                WHERE LogId IN ({string.Join(",", paramNames)})
+                  AND Status = 'Consumed';";
+
+            int rowsAffected;
+            await using (var updateCmd = new MySqlCommand(updateSql, connection, (MySqlTransaction)transaction))
+            {
+                for (int i = 0; i < idList.Count; i++)
+                    updateCmd.Parameters.AddWithValue(paramNames[i], idList[i]);
+
+                rowsAffected = await updateCmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+            return rowsAffected;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
 }

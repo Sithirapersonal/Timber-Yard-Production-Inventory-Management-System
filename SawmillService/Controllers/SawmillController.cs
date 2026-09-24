@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using SawmillService.DTOs;
+using SawmillService.Events;
 using SawmillService.Repositories;
 using SawmillService.Services;
 
@@ -13,15 +15,18 @@ public class SawmillController : ControllerBase
 {
     private readonly ISawmillRepository _repository;
     private readonly LogIntakeClient _logIntakeClient;
+    private readonly KafkaProducerService _kafkaProducer;
     private readonly ILogger<SawmillController> _logger;
 
     public SawmillController(
         ISawmillRepository repository,
         LogIntakeClient logIntakeClient,
+        KafkaProducerService kafkaProducer,
         ILogger<SawmillController> logger)
     {
         _repository = repository;
         _logIntakeClient = logIntakeClient;
+        _kafkaProducer = kafkaProducer;
         _logger = logger;
     }
 
@@ -314,18 +319,54 @@ public class SawmillController : ControllerBase
 
     // ─────────────────────────────────────────────────────────────────────────
     // PUT api/Sawmill/jobs/{id}/cancel
-    // Admin only — marks a job Cancelled.
-    // Logs are NOT reverted to InStock (see SawmillRepository.CancelJobAsync for rationale).
+    // Admin, Manager, Supervisor — marks an InProgress job Cancelled.
+    // Reason is optional (nullable body): when missing/empty it defaults server-side
+    // to "No reason provided", so the existing frontend (which sends no body today)
+    // keeps working until a future frontend change passes a real reason.
+    // After the DB cancel the job's allocated logs are published to Kafka as a
+    // RawStockReversedEvent (fire-and-forget) so LogIntakeService asynchronously
+    // flips them back to InStock. The publish is best-effort: a Kafka failure is
+    // logged but never fails the 200 response, because the job is already cancelled.
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPut("jobs/{id:int}/cancel")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> CancelJob(int id)
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> CancelJob(int id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CancelJobDto? dto)
     {
         var cancelled = await _repository.CancelJobAsync(id);
         if (!cancelled)
         {
             return NotFound(new { message = "Job not found or is not in an InProgress state." });
         }
+
+        try
+        {
+            var reason = string.IsNullOrWhiteSpace(dto?.Reason) ? "No reason provided" : dto.Reason.Trim();
+
+            var allocations = (await _repository.GetLogAllocationsForJobAsync(id)).ToList();
+
+            var userIdClaim = User.FindFirst("userId")?.Value;
+            var cancelledBy = int.TryParse(userIdClaim, out var uid) ? uid : 0;
+
+            var evt = new RawStockReversedEvent
+            {
+                SawJobId = id,
+                Logs = allocations
+                    .Select(a => new RawStockReversedEvent.LogEntry { LogId = a.LogId, VolumeM3 = a.VolumeM3 })
+                    .ToList(),
+                Reason = reason,
+                CancelledBy = cancelledBy,
+                CancelledAt = DateTime.UtcNow
+            };
+
+            await _kafkaProducer.PublishRawStockReversedAsync(evt);
+        }
+        catch (Exception ex)
+        {
+            // The job is already cancelled in SawmillDB — a failed publish (or a failed
+            // allocation read) must not fail the request or roll anything back.
+            _logger.LogError(ex, "Failed to publish RawStockReversedEvent for cancelled job {SawJobId}; allocated logs will not be auto-reverted", id);
+        }
+
         return Ok(new { message = "Saw job cancelled successfully." });
     }
 

@@ -73,6 +73,12 @@ builder.Services.AddHttpClient<LogIntakeClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+// Kafka producer for raw-stock-reversed events — singleton: producers are safe and
+// intended to be reused across the app lifetime (do not create one per request).
+var kafkaBootstrapServers = builder.Configuration["Kafka:BootstrapServers"] ?? "localhost:9092";
+var kafkaTopic = builder.Configuration["Kafka:Topic"] ?? "raw-stock-reversed";
+builder.Services.AddSingleton(new KafkaProducerService(kafkaBootstrapServers, kafkaTopic));
+
 // CORS — same AllowFrontend policy as LogIntakeService (any origin/header/method)
 builder.Services.AddCors(options =>
 {

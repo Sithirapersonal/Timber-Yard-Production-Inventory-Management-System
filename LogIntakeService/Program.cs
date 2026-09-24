@@ -1,5 +1,6 @@
 using System.Text;
 using LogIntakeService.Repositories;
+using LogIntakeService.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -56,6 +57,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<ILogIntakeRepository, LogIntakeRepository>();
+
+// Background Kafka consumer that reverts a cancelled job's logs back to InStock.
+// Registered as a hosted service; it retries its own connection with backoff and
+// never takes the rest of the service down.
+builder.Services.AddHostedService<RawStockReversedConsumer>();
 
 builder.Services.AddCors(options =>
 {
