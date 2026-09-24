@@ -137,6 +137,16 @@ public class SawmillControllerStartSawJobTests
         var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(201, objectResult.StatusCode);
 
+        // The publish is fire-and-forget (deliberately NOT awaited in the request
+        // path), so it may still be in flight when StartSawJob returns. Wait
+        // deterministically (bounded) for the background task's invocation before
+        // verifying it happened exactly once.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (_logsConsumedProducer.Invocations.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
         _logsConsumedProducer.Verify(p => p.PublishLogsConsumedAsync(It.Is<LogsConsumedEvent>(e =>
             e.SawJobId == 7 &&
             e.StartedBy == 42 &&

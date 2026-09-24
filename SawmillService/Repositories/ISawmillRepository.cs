@@ -32,6 +32,12 @@ public interface ISawmillRepository
     Task<SawJob?> GetJobByIdAsync(int sawJobId);
     Task<IEnumerable<SawJobLogAllocation>> GetLogAllocationsForJobAsync(int sawJobId);
 
+    // Saw-job history (Completed and Cancelled only, no limit).
+    // from/to are inclusive bounds on StartedAt, both optional (null = unbounded).
+    // A non-null 'to' is treated as END-OF-DAY on that calendar day, matching
+    // GetWastageYieldReportAsync's existing date-bound convention.
+    Task<IEnumerable<SawJob>> GetJobHistoryAsync(DateTime? from, DateTime? to);
+
     // Wastage & yield report (Completed jobs only, bounded by CompletedAt)
     // from/to are inclusive date bounds on CompletedAt, both optional (null = unbounded).
     // A non-null 'to' provided as a date is treated as END-OF-DAY: a job completed

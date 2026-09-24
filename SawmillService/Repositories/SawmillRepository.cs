@@ -449,6 +449,114 @@ public class SawmillRepository : ISawmillRepository
         return job;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Read Job History (Completed + Cancelled only, no limit)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public async Task<IEnumerable<SawJob>> GetJobHistoryAsync(DateTime? from, DateTime? to)
+    {
+        var jobs = new List<SawJob>();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        // "to" is an inclusive calendar day: expand midnight → following midnight
+        // so the comparison uses an exclusive upper bound (`<`) and therefore
+        // catches every StartedAt timestamp anywhere on that day — the same
+        // convention as GetWastageYieldReportAsync, but on StartedAt rather than
+        // CompletedAt (Job History is filtered by when a job STARTED).
+        var toExclusive = to.HasValue ? to.Value.Date.AddDays(1) : (DateTime?)null;
+
+        // Fetch job rows. InProgress jobs are excluded unconditionally — history
+        // only ever shows finished jobs; active ones stay on the Recently Started
+        // Jobs list until they resolve. No LIMIT: every matching row is returned.
+        var sql = @"
+            SELECT SawJobId, JobCode, StockId, SpeciesName, LengthFt, TotalVolumeM3,
+                   Notes, Status, StartedBy, StartedAt, MachineId, MachineCode, MachineName,
+                   OutputVolumeM3, WastageM3, CompletedAt
+            FROM SawJobs
+            WHERE Status IN ('Completed', 'Cancelled')";
+
+        // Both bounds optional — omit either for an unbounded side, omit both
+        // for every finished job.
+        if (from.HasValue) sql += "\n            AND StartedAt >= @From";
+        if (toExclusive.HasValue) sql += "\n            AND StartedAt < @ToExclusive";
+
+        sql += "\n            ORDER BY StartedAt DESC;";
+
+        await using (var cmd = new MySqlCommand(sql, connection))
+        {
+            if (from.HasValue) cmd.Parameters.AddWithValue("@From", from.Value.Date);
+            if (toExclusive.HasValue) cmd.Parameters.AddWithValue("@ToExclusive", toExclusive.Value);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                jobs.Add(new SawJob
+                {
+                    SawJobId = reader.GetInt32(reader.GetOrdinal("SawJobId")),
+                    JobCode = reader.GetString(reader.GetOrdinal("JobCode")),
+                    StockId = reader.GetInt32(reader.GetOrdinal("StockId")),
+                    SpeciesName = reader.GetString(reader.GetOrdinal("SpeciesName")),
+                    LengthFt = reader.GetDecimal(reader.GetOrdinal("LengthFt")),
+                    TotalVolumeM3 = reader.GetDecimal(reader.GetOrdinal("TotalVolumeM3")),
+                    Notes = reader.IsDBNull(reader.GetOrdinal("Notes")) ? null : reader.GetString(reader.GetOrdinal("Notes")),
+                    Status = reader.GetString(reader.GetOrdinal("Status")),
+                    StartedBy = reader.GetInt32(reader.GetOrdinal("StartedBy")),
+                    StartedAt = reader.GetDateTime(reader.GetOrdinal("StartedAt")),
+                    MachineId = reader.IsDBNull(reader.GetOrdinal("MachineId")) ? 0 : reader.GetInt32(reader.GetOrdinal("MachineId")),
+                    MachineCode = reader.IsDBNull(reader.GetOrdinal("MachineCode")) ? "" : reader.GetString(reader.GetOrdinal("MachineCode")),
+                    MachineName = reader.IsDBNull(reader.GetOrdinal("MachineName")) ? "" : reader.GetString(reader.GetOrdinal("MachineName")),
+                    OutputVolumeM3 = reader.IsDBNull(reader.GetOrdinal("OutputVolumeM3")) ? null : reader.GetDecimal(reader.GetOrdinal("OutputVolumeM3")),
+                    WastageM3 = reader.IsDBNull(reader.GetOrdinal("WastageM3")) ? null : reader.GetDecimal(reader.GetOrdinal("WastageM3")),
+                    CompletedAt = reader.IsDBNull(reader.GetOrdinal("CompletedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("CompletedAt"))
+                });
+            }
+        }
+        // The block above ensures `reader` and `cmd` are fully disposed (and the
+        // reader closed) before the second query below runs on this same
+        // connection — same discipline and rationale as GetRecentJobsAsync.
+
+        if (jobs.Count == 0) return jobs;
+
+        // Fetch worker names (with employee codes) for each job in a single query
+        // — same batched pattern as GetRecentJobsAsync.
+        var jobIds = jobs.Select(j => j.SawJobId).ToList();
+        var workerParamNames = jobIds.Select((_, i) => $"@jid{i}").ToArray();
+        var workerSql = $@"
+            SELECT sjw.SawJobId, w.FullName, w.EmployeeCode
+            FROM SawJobWorkers sjw
+            JOIN Workers w ON sjw.WorkerId = w.WorkerId
+            WHERE sjw.SawJobId IN ({string.Join(",", workerParamNames)})
+            ORDER BY w.FullName ASC;";
+
+        var workerMap = new Dictionary<int, List<string>>();
+        await using (var workerCmd = new MySqlCommand(workerSql, connection))
+        {
+            for (int i = 0; i < jobIds.Count; i++)
+            {
+                workerCmd.Parameters.AddWithValue(workerParamNames[i], jobIds[i]);
+            }
+
+            await using var workerReader = await workerCmd.ExecuteReaderAsync();
+            while (await workerReader.ReadAsync())
+            {
+                var jId = workerReader.GetInt32(workerReader.GetOrdinal("SawJobId"));
+                var name = workerReader.GetString(workerReader.GetOrdinal("FullName"));
+                var code = workerReader.GetString(workerReader.GetOrdinal("EmployeeCode"));
+                if (!workerMap.ContainsKey(jId)) workerMap[jId] = new List<string>();
+                workerMap[jId].Add($"{name} ({code})");
+            }
+        }
+
+        foreach (var job in jobs)
+        {
+            if (workerMap.TryGetValue(job.SawJobId, out var names))
+                job.AssignedWorkerNames = names;
+        }
+
+        return jobs;
+    }
+
     public async Task<bool> CompleteSawJobAsync(int sawJobId, decimal outputVolumeM3, decimal wastageM3)
     {
         await using var connection = new MySqlConnection(_connectionString);

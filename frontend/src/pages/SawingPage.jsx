@@ -7,6 +7,7 @@ import RoleBadge from '../components/ui/RoleBadge';
 import StockOverviewTab from '../components/sawmill/StockOverviewTab';
 import StartJobTab from '../components/sawmill/StartJobTab';
 import WastageYieldReportTab from '../components/sawmill/WastageYieldReportTab';
+import JobHistoryTab from '../components/sawmill/JobHistoryTab';
 
 const API_BASE_URL = import.meta.env.VITE_SAWMILL_API_URL || 'http://localhost:5210/api/Sawmill';
 
@@ -143,6 +144,7 @@ export default function SawingPage() {
             { id: 'overview', label: 'Stock Overview' },
             { id: 'start',    label: '+ Start Saw Job', hidden: !canWrite },
             { id: 'report',   label: 'Wastage & Yield Report', hidden: !canViewWastageYieldReport },
+            { id: 'history',  label: 'Job History' },
           ]
             .filter(t => !t.hidden)
             .map(tab => (
@@ -207,6 +209,10 @@ export default function SawingPage() {
               Wastage &amp; Yield Report. This report is restricted to Admin and Manager roles.
             </p>
           </Card>
+        )}
+
+        {activeTab === 'history' && (
+          <JobHistoryTab apiBaseUrl={API_BASE_URL} />
         )}
 
       </div>

@@ -278,6 +278,33 @@ public class SawmillController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // GET api/Sawmill/jobs/history
+    // Job History: every finished saw job (Completed or Cancelled), no limit,
+    // optionally bounded by an inclusive StartedAt date range. InProgress jobs
+    // never appear here — they stay on the Recently Started Jobs list until
+    // resolved. Date bounds reuse the wastage-yield-report convention
+    // (inclusive 'from', end-of-day inclusive 'to') but filter on StartedAt,
+    // not CompletedAt. Search and sorting are client-side, so the endpoint
+    // takes only the optional from/to date params — no q/sortBy/sortDir.
+    // No role restriction beyond the controller's class-level [Authorize],
+    // matching GetJobs/GetStock/GetWorkers/GetMachines.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpGet("jobs/history")]
+    public async Task<IActionResult> GetJobHistory(
+        [FromQuery] string? from = null,
+        [FromQuery] string? to = null)
+    {
+        if (!TryParseReportDate(from, out var fromDate))
+            return BadRequest(new { message = "Invalid 'from' date. Use YYYY-MM-DD." });
+
+        if (!TryParseReportDate(to, out var toDate))
+            return BadRequest(new { message = "Invalid 'to' date. Use YYYY-MM-DD." });
+
+        var jobs = await _repository.GetJobHistoryAsync(fromDate, toDate);
+        return Ok(jobs);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // PUT api/Sawmill/jobs/{id}/complete
     // Admin, Manager, Supervisor — marks an InProgress saw job Completed with sawn board output.
     // ─────────────────────────────────────────────────────────────────────────
