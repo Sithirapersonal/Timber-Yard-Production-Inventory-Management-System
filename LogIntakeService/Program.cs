@@ -1,5 +1,6 @@
 using System.Text;
 using LogIntakeService.Repositories;
+using LogIntakeService.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -56,6 +57,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<ILogIntakeRepository, LogIntakeRepository>();
+
+// Background Kafka consumers that keep LogIntakeService's Logs status in sync with
+// SawmillService: RawStockReversedConsumer reverts a cancelled job's logs back to
+// InStock; LogsConsumedConsumer flips a started job's allocated logs to Consumed.
+// Registered as hosted services; they retry their own connections with backoff and
+// never take the rest of the service down.
+builder.Services.AddHostedService<RawStockReversedConsumer>();
+builder.Services.AddHostedService<LogsConsumedConsumer>();
 
 builder.Services.AddCors(options =>
 {

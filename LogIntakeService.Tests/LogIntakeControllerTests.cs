@@ -25,15 +25,18 @@ public class LogIntakeControllerTests
         var dto = new CreateDeliveryDto
         {
             SupplierId = 1,
-            Species = "Teak",
-            Grade = "A",
-            VolumeM3 = 12.50m,
             VehicleNumber = "WP-CAB-1234",
-            ReceivedBy = 101
+            ReceivedBy = 101,
+            LogCount = 1,
+            Notes = "Standard single-log delivery",
+            Logs = new List<DeliveryLogEntryDto>
+            {
+                new() { SpeciesId = 1, LengthId = 1, GirthFt = 4.5m }
+            }
         };
 
         _mockRepository
-            .Setup(repo => repo.RecordDeliveryAsync(It.IsAny<TimberDelivery>()))
+            .Setup(repo => repo.RecordDeliveryAsync(It.IsAny<TimberDelivery>(), It.IsAny<IEnumerable<DeliveryLogEntryDto>>()))
             .ReturnsAsync(42);
 
         var result = await _controller.RecordDelivery(dto);
@@ -43,12 +46,70 @@ public class LogIntakeControllerTests
     }
 
     [Fact]
+    public async Task RecordDelivery_MultipleLogs_PassesAllLogEntriesToRepository()
+    {
+        var logs = new List<DeliveryLogEntryDto>
+        {
+            new() { SpeciesId = 1, LengthId = 1, GirthFt = 3.5m },
+            new() { SpeciesId = 2, LengthId = 3, GirthFt = 4.2m },
+            new() { SpeciesId = 3, LengthId = 2, GirthFt = 5.0m }
+        };
+
+        var dto = new CreateDeliveryDto
+        {
+            SupplierId = 2,
+            VehicleNumber = "WP-XYZ-9876",
+            ReceivedBy = 202,
+            LogCount = logs.Count,
+            Notes = "Multi-log batch test",
+            Logs = logs
+        };
+
+        _mockRepository
+            .Setup(repo => repo.RecordDeliveryAsync(It.IsAny<TimberDelivery>(), It.IsAny<IEnumerable<DeliveryLogEntryDto>>()))
+            .ReturnsAsync(99);
+
+        var result = await _controller.RecordDelivery(dto);
+
+        var createdResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(201, createdResult.StatusCode);
+
+        _mockRepository.Verify(repo => repo.RecordDeliveryAsync(
+            It.Is<TimberDelivery>(d => d.SupplierId == 2 && d.ReceivedBy == 202 && d.LogCount == 3),
+            It.Is<IEnumerable<DeliveryLogEntryDto>>(passedLogs =>
+                passedLogs.Count() == 3 &&
+                passedLogs.First().GirthFt == 3.5m &&
+                passedLogs.Last().GirthFt == 5.0m)
+        ), Times.Once);
+    }
+
+    [Fact]
     public async Task GetStock_ReturnsOkResultWithStockList()
     {
-        var sampleStock = new List<RawStock>
+        var sampleStock = new List<StockSummaryDto>
         {
-            new() { StockId = 1, Species = "Teak", Grade = "A", CurrentVolumeM3 = 30.00m, LowStockThreshold = 10.00m },
-            new() { StockId = 2, Species = "Mahogany", Grade = "B", CurrentVolumeM3 = 5.00m, LowStockThreshold = 12.00m }
+            new()
+            {
+                StockId = 1,
+                SpeciesId = 1,
+                Species = "Teak",
+                LengthId = 1,
+                LengthFt = 10.00m,
+                LogCount = 5,
+                TotalVolumeM3 = 30.00m,
+                LowStockThreshold = 10.00m
+            },
+            new()
+            {
+                StockId = 2,
+                SpeciesId = 2,
+                Species = "Mahogany",
+                LengthId = 2,
+                LengthFt = 12.00m,
+                LogCount = 2,
+                TotalVolumeM3 = 5.00m,
+                LowStockThreshold = 12.00m
+            }
         };
 
         _mockRepository
@@ -58,8 +119,13 @@ public class LogIntakeControllerTests
         var result = await _controller.GetStock();
 
         var okResult = Assert.IsType<OkObjectResult>(result);
-        var returnedStock = Assert.IsAssignableFrom<IEnumerable<RawStock>>(okResult.Value);
-        Assert.Equal(2, returnedStock.Count());
+        var returnedStock = Assert.IsAssignableFrom<IEnumerable<StockSummaryDto>>(okResult.Value);
+        var stockList = returnedStock.ToList();
+        Assert.Equal(2, stockList.Count);
+        Assert.Equal("Teak", stockList[0].Species);
+        Assert.Equal(30.00m, stockList[0].TotalVolumeM3);
+        Assert.False(stockList[0].IsLowStock);
+        Assert.True(stockList[1].IsLowStock);
     }
 
     [Fact]

@@ -11,7 +11,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const { login } = useAuth();
+  const { login, sessionExpiredMessage } = useAuth();
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
@@ -20,6 +20,7 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
+      // This is the unauthenticated login call — deliberately NOT using fetchWithAuth
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -52,6 +53,16 @@ export default function LoginPage() {
           <h1 className="font-display text-3xl font-semibold text-white">Staff Login</h1>
           <p className="text-white/50 text-sm mt-1">Production &amp; Inventory Management</p>
         </div>
+
+        {/* Session-expired banner — shown after automatic 401 redirect */}
+        {sessionExpiredMessage && (
+          <p
+            id="session-expired-banner"
+            className="text-amber-800 text-sm mb-4 bg-amber-100 border border-amber-300 rounded-md px-3 py-2 text-center"
+          >
+            {sessionExpiredMessage}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="bg-sawdust rounded-lg shadow-xl p-8">
           <div className="mb-4">
@@ -96,3 +107,4 @@ export default function LoginPage() {
     </div>
   );
 }
+

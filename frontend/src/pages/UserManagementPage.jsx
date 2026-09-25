@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { fetchWithAuth } from '../utils/api';
 import Layout from '../components/Layout';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -38,13 +39,11 @@ export default function UserManagementPage() {
   async function fetchUsers() {
     setLoadingUsers(true);
     try {
-      const res = await fetch(`${API_URL}/auth/users`, {
-        headers: { Authorization: `Bearer ${user.token}` },
-      });
+      const res = await fetchWithAuth(`${API_URL}/auth/users`);
       if (!res.ok) throw new Error('Failed to load users');
       setUsers(await res.json());
     } catch (err) {
-      setError(err.message);
+      if (err.message !== 'SESSION_EXPIRED') setError(err.message);
     } finally {
       setLoadingUsers(false);
     }
@@ -53,13 +52,11 @@ export default function UserManagementPage() {
   async function fetchHistory() {
     setLoadingHistory(true);
     try {
-      const res = await fetch(`${API_URL}/auth/login-history`, {
-        headers: { Authorization: `Bearer ${user.token}` },
-      });
+      const res = await fetchWithAuth(`${API_URL}/auth/login-history`);
       if (!res.ok) throw new Error('Failed to load login history');
       setHistory(await res.json());
     } catch (err) {
-      setError(err.message);
+      if (err.message !== 'SESSION_EXPIRED') setError(err.message);
     } finally {
       setLoadingHistory(false);
     }
@@ -78,12 +75,8 @@ export default function UserManagementPage() {
     setSubmitting(true);
 
     try {
-      const res = await fetch(`${API_URL}/auth/users`, {
+      const res = await fetchWithAuth(`${API_URL}/auth/users`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
         body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole }),
       });
 
@@ -99,8 +92,8 @@ export default function UserManagementPage() {
       setNewPassword('');
       setNewRole('Supervisor');
       fetchUsers();
-    } catch {
-      setAddError('Could not reach the server.');
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') setAddError('Could not reach the server.');
     } finally {
       setSubmitting(false);
     }
@@ -129,12 +122,8 @@ export default function UserManagementPage() {
     if (editPassword) body.password = editPassword;
 
     try {
-      const res = await fetch(`${API_URL}/auth/users/${userId}`, {
+      const res = await fetchWithAuth(`${API_URL}/auth/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
         body: JSON.stringify(body),
       });
 
@@ -147,8 +136,8 @@ export default function UserManagementPage() {
 
       cancelEdit();
       fetchUsers();
-    } catch {
-      setEditError('Could not reach the server.');
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') setEditError('Could not reach the server.');
     } finally {
       setEditSubmitting(false);
     }
@@ -164,9 +153,8 @@ export default function UserManagementPage() {
     setDeletingUserId(userId);
 
     try {
-      const res = await fetch(`${API_URL}/auth/users/${userId}`, {
+      const res = await fetchWithAuth(`${API_URL}/auth/users/${userId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${user.token}` },
       });
 
       const data = await res.json();
@@ -177,8 +165,8 @@ export default function UserManagementPage() {
       }
 
       fetchUsers();
-    } catch {
-      setDeleteError('Could not reach the server.');
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') setDeleteError('Could not reach the server.');
     } finally {
       setDeletingUserId(null);
     }

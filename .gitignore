@@ -21,3 +21,14 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Manual verification scratch files
+e2e/
+e2e_*.txt
+e2e_*.json
+e2e_*.log
+mint_token.ps1
+mint_report.txt
+
+# DB export snapshots (real data, not source)
+AuthDB_export.sql

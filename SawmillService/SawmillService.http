@@ -1,0 +1,47 @@
+### GET Stock Overview
+GET http://localhost:5210/api/Sawmill/stock
+Authorization: Bearer {{token}}
+
+###
+
+### GET Logs for a Stock Batch
+GET http://localhost:5210/api/Sawmill/stock/1/logs
+Authorization: Bearer {{token}}
+
+###
+
+### GET Workers
+GET http://localhost:5210/api/Sawmill/workers
+Authorization: Bearer {{token}}
+
+###
+
+### GET Workers with Search
+GET http://localhost:5210/api/Sawmill/workers?q=kamal
+Authorization: Bearer {{token}}
+
+###
+
+### GET Recent Jobs
+GET http://localhost:5210/api/Sawmill/jobs
+Authorization: Bearer {{token}}
+
+###
+
+### POST Start Saw Job
+POST http://localhost:5210/api/Sawmill/jobs
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "stockId": 1,
+  "logIds": [1, 2, 3],
+  "workerIds": [1, 2],
+  "notes": "Morning batch — standard cut"
+}
+
+###
+
+### PUT Cancel Job (Admin only)
+PUT http://localhost:5210/api/Sawmill/jobs/1/cancel
+Authorization: Bearer {{token}}
