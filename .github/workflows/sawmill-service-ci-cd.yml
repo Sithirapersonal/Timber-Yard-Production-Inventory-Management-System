@@ -35,6 +35,9 @@ jobs:
       - name: Build Service
         run: dotnet build SawmillService/SawmillService.csproj --no-restore -c Release
 
+      - name: Build Tests
+        run: dotnet build SawmillService.Tests/SawmillService.Tests.csproj --no-restore -c Release
+
       - name: Run Unit Tests
         run: dotnet test SawmillService.Tests/SawmillService.Tests.csproj --no-build -c Release --verbosity normal
 
