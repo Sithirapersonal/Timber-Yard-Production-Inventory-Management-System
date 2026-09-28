@@ -1,34 +1,69 @@
 name: sawmill-service-ci-cd
+
 on:
   push:
     branches: [develop, main]
-    paths: ['SawmillService/**']
+    paths:
+      - 'SawmillService/**'
+      - 'SawmillService.Tests/**'
+      - '.github/workflows/sawmill-service-ci-cd.yml'
   pull_request:
     branches: [develop, main]
-    paths: ['SawmillService/**']
+    paths:
+      - 'SawmillService/**'
+      - 'SawmillService.Tests/**'
+      - '.github/workflows/sawmill-service-ci-cd.yml'
 
 jobs:
   build-and-test:
+    name: Build & Run Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: dotnet restore SawmillService
-      - run: dotnet build SawmillService --no-restore
+
+      - name: Restore Dependencies
+        run: |
+          dotnet restore SawmillService/SawmillService.csproj
+          dotnet restore SawmillService.Tests/SawmillService.Tests.csproj
+
+      - name: Build Service
+        run: dotnet build SawmillService/SawmillService.csproj --no-restore -c Release
+
+      - name: Build Tests
+        run: dotnet build SawmillService.Tests/SawmillService.Tests.csproj --no-restore -c Release
+
+      - name: Run Unit Tests
+        run: dotnet test SawmillService.Tests/SawmillService.Tests.csproj --no-build -c Release --verbosity normal
+
+      - name: Verify Docker Build
+        run: docker build -t timber-yard-sawmill-service:ci-test -f SawmillService/Dockerfile .
 
   deploy:
+    name: Deploy to Azure
     needs: build-and-test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: production
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: dotnet publish SawmillService -c Release -o SawmillService/publish
-      - uses: azure/webapps-deploy@v3
+
+      - name: Publish SawmillService
+        run: dotnet publish SawmillService/SawmillService.csproj -c Release -o SawmillService/publish
+
+      - name: Deploy to Azure WebApp
+        uses: azure/webapps-deploy@v3
         with:
           app-name: 'timber-yard-sawmill-service'
           publish-profile: ${{ secrets.AZURE_SAWMILL_SERVICE_PUBLISH_PROFILE }}
