@@ -6,11 +6,13 @@ on:
     paths:
       - 'SawmillService/**'
       - 'SawmillService.Tests/**'
+      - '.github/workflows/sawmill-service-ci-cd.yml'
   pull_request:
     branches: [develop, main]
     paths:
       - 'SawmillService/**'
       - 'SawmillService.Tests/**'
+      - '.github/workflows/sawmill-service-ci-cd.yml'
 
 jobs:
   build-and-test:
