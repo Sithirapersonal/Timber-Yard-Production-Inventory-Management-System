@@ -13,6 +13,7 @@ public interface ILogIntakeRepository
     Task<IEnumerable<Supplier>> GetActiveSuppliersAsync(bool includeInactive = false);
     Task<int> AddSupplierAsync(Supplier supplier);
     Task<bool> DeactivateSupplierAsync(int supplierId);
+    Task<bool> ReactivateSupplierAsync(int supplierId);
 
     /// <summary>
     /// Permanently (hard) deletes a supplier row.

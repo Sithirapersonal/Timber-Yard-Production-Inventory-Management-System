@@ -74,6 +74,13 @@ export default function LogIntakePage() {
     supplierName: ''
   });
 
+  // Modal for Reactivating a Deactivated Supplier (Admin-only)
+  const [reactivateSupplierModal, setReactivateSupplierModal] = useState({
+    isOpen: false,
+    supplierId: null,
+    supplierName: ''
+  });
+
   // Modal for Manual Stock Adjustment (legacy)
   const [adjustModal, setAdjustModal] = useState({
     isOpen: false,
@@ -446,6 +453,27 @@ export default function LogIntakePage() {
       }
     } catch (err) {
       if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error deleting supplier.');
+    }
+  };
+
+  // 10c. Admin-Only Reactivate Supplier
+  const handleReactivateSupplierConfirm = async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/suppliers/${reactivateSupplierModal.supplierId}/reactivate`, {
+        method: 'PUT',
+      });
+
+      if (res.ok) {
+        showNotification('success', `Supplier "${reactivateSupplierModal.supplierName}" reactivated.`);
+        setReactivateSupplierModal({ isOpen: false, supplierId: null, supplierName: '' });
+        fetchSuppliers();
+      } else {
+        const errData = await res.json().catch(() => null);
+        showNotification('error', errData?.message || 'Failed to reactivate supplier.');
+        setReactivateSupplierModal({ isOpen: false, supplierId: null, supplierName: '' });
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error reactivating supplier.');
     }
   };
 
@@ -1064,19 +1092,31 @@ export default function LogIntakePage() {
                                   Deactivate
                                 </button>
                               ) : (
-                                <button
-                                  onClick={() => setDeleteSupplierModal({
-                                    isOpen: true,
-                                    supplierId: s.supplierId,
-                                    supplierName: s.supplierName
-                                  })}
-                                  title="Permanently delete this deactivated supplier"
-                                  className="text-gray-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded p-1.5 transition-colors"
-                                >
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                </button>
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => setReactivateSupplierModal({
+                                      isOpen: true,
+                                      supplierId: s.supplierId,
+                                      supplierName: s.supplierName
+                                    })}
+                                    className="text-xs px-2.5 py-1 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border border-emerald-300 rounded font-medium transition-colors whitespace-nowrap"
+                                  >
+                                    Reactivate
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteSupplierModal({
+                                      isOpen: true,
+                                      supplierId: s.supplierId,
+                                      supplierName: s.supplierName
+                                    })}
+                                    title="Permanently delete this deactivated supplier"
+                                    className="text-gray-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded p-1.5 transition-colors"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                  </button>
+                                </div>
                               )}
                             </td>
                           )}
@@ -1183,6 +1223,35 @@ export default function LogIntakePage() {
                   className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-medium transition-colors"
                 >
                   Permanently Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: Reactivate Supplier Confirmation (Admin-Only) */}
+        {reactivateSupplierModal.isOpen && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+              <h3 className="text-lg font-bold text-gray-800">Reactivate Supplier</h3>
+              <p className="text-sm text-gray-600">
+                Are you sure you want to reactivate <span className="font-semibold text-gray-800">{reactivateSupplierModal.supplierName}</span>?
+                This supplier will be restored to active status and will appear in the Record Delivery dropdown.
+              </p>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReactivateSupplierModal({ isOpen: false, supplierId: null, supplierName: '' })}
+                  className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReactivateSupplierConfirm}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  Reactivate
                 </button>
               </div>
             </div>

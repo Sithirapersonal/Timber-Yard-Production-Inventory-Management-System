@@ -343,6 +343,18 @@ public class LogIntakeRepository : ILogIntakeRepository
         return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
+    public async Task<bool> ReactivateSupplierAsync(int supplierId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "UPDATE Suppliers SET IsActive = TRUE WHERE SupplierId = @SupplierId;";
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
     // Hard delete. Delivery-history rule: a supplier referenced by ANY
     // Deliveries rows can never be hard-deleted (deliveries would lose their
     // supplier attribution), so it is rejected with InvalidOperationException.

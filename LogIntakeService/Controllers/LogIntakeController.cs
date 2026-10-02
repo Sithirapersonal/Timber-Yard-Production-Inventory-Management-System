@@ -204,6 +204,19 @@ public class LogIntakeController : ControllerBase
         return Ok(new { message = "Supplier deactivated successfully." });
     }
 
+    [HttpPut("suppliers/{id:int}/reactivate")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ReactivateSupplier(int id)
+    {
+        var reactivated = await _repository.ReactivateSupplierAsync(id);
+        if (!reactivated)
+        {
+            return NotFound(new { message = "Inactive supplier not found." });
+        }
+
+        return Ok(new { message = "Supplier reactivated successfully." });
+    }
+
     [HttpDelete("suppliers/{id:int}")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteSupplier(int id)

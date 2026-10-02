@@ -91,4 +91,41 @@ public class SupplierRepositoryTests
         var suppliers = (await repo.GetActiveSuppliersAsync(includeInactive: true)).ToList();
         Assert.Contains(suppliers, s => s.SupplierId == supplierId);
     }
+
+    [Fact]
+    public async Task ReactivateSupplier_DeactivatedSupplier_BecomesActiveAndReturnedByGetActiveSuppliers()
+    {
+        var repo = CreateRepository();
+        var uniqueName = $"Reactivate Supplier {Guid.NewGuid():N}";
+
+        var newId = await repo.AddSupplierAsync(new Supplier
+        {
+            SupplierName = uniqueName,
+            ContactNumber = "+94770003344",
+            Address = "Reactivate Address"
+        });
+
+        Assert.True(newId > 0);
+
+        // Deactivate supplier
+        var deactivated = await repo.DeactivateSupplierAsync(newId);
+        Assert.True(deactivated);
+
+        var activeSuppliersAfterDeactivation = (await repo.GetActiveSuppliersAsync()).ToList();
+        Assert.DoesNotContain(activeSuppliersAfterDeactivation, s => s.SupplierId == newId);
+
+        // Reactivate supplier
+        var reactivated = await repo.ReactivateSupplierAsync(newId);
+        Assert.True(reactivated);
+
+        // Verify it is active again and returned by GetActiveSuppliersAsync
+        var activeSuppliersAfterReactivation = (await repo.GetActiveSuppliersAsync()).ToList();
+        var reactivatedSupplier = activeSuppliersAfterReactivation.FirstOrDefault(s => s.SupplierId == newId);
+        Assert.NotNull(reactivatedSupplier);
+        Assert.True(reactivatedSupplier.IsActive);
+        Assert.Equal(uniqueName, reactivatedSupplier.SupplierName);
+
+        // Cleanup: deactivate
+        await repo.DeactivateSupplierAsync(newId);
+    }
 }
