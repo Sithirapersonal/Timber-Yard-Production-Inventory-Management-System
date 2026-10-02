@@ -15,7 +15,7 @@ import Button from '../ui/Button';
  * over the already-fetched array, so the API is re-called only when the date
  * range changes, never per keystroke). All volumes are cubic metres (m³).
  */
-export default function JobHistoryTab({ apiBaseUrl }) {
+export default function JobHistoryTab({ apiBaseUrl, isAdmin = false }) {
   // ── Date-range filter (empty string = unbounded on that side) ───────────
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -24,6 +24,11 @@ export default function JobHistoryTab({ apiBaseUrl }) {
   const [history, setHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
+
+  // ── Permanent-delete modal state (Admin, Cancelled rows only) ────────────
+  const [deleteModal, setDeleteModal] = useState({ open: false, job: null });
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // ── Client-side search & sort (never trigger a network round-trip) ──────
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,6 +68,28 @@ export default function JobHistoryTab({ apiBaseUrl }) {
     setSearchQuery('');
     setFromDate('');
     setToDate('');
+  };
+
+  // ── Permanent delete of a Cancelled job (Admin only) ─────────────────────
+  const handleDeleteConfirm = async () => {
+    const job = deleteModal.job;
+    if (!job) return;
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      const res = await fetchWithAuth(`${apiBaseUrl}/jobs/${job.sawJobId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setDeleteModal({ open: false, job: null });
+        fetchHistory();
+      } else {
+        const body = await res.json().catch(() => null);
+        setDeleteError(body?.message || `Failed to delete job (${res.status}).`);
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') setDeleteError('Network error deleting job.');
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   // Column-click sorting: same column flips direction; a new column adopts its
@@ -202,24 +229,25 @@ export default function JobHistoryTab({ apiBaseUrl }) {
                     </th>
                   ),
                 )}
+                {isAdmin && <th className="py-3 px-4 font-semibold text-right whitespace-nowrap">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-charcoal/10">
               {firstLoad ? (
                 <tr>
-                  <td colSpan={COLUMNS.length} className="py-6 px-4 text-center text-fog">
+                  <td colSpan={COLUMNS.length + (isAdmin ? 1 : 0)} className="py-6 px-4 text-center text-fog">
                     Loading history…
                   </td>
                 </tr>
               ) : jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={COLUMNS.length} className="py-6 px-4 text-center text-fog">
+                  <td colSpan={COLUMNS.length + (isAdmin ? 1 : 0)} className="py-6 px-4 text-center text-fog">
                     No saw jobs in the selected date range.
                   </td>
                 </tr>
               ) : sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={COLUMNS.length} className="py-6 px-4 text-center text-fog">
+                  <td colSpan={COLUMNS.length + (isAdmin ? 1 : 0)} className="py-6 px-4 text-center text-fog">
                     No saw jobs match your search/filter.
                   </td>
                 </tr>
@@ -240,6 +268,22 @@ export default function JobHistoryTab({ apiBaseUrl }) {
                     <td className="py-3 px-4 text-charcoal">
                       {job.machineName} ({job.machineCode})
                     </td>
+                    {isAdmin && (
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        {job.status === 'Cancelled' && (
+                          <button
+                            type="button"
+                            title="Permanently delete this cancelled job"
+                            onClick={() => setDeleteModal({ open: true, job })}
+                            className="text-fog hover:text-rust hover:bg-rust/10 border border-transparent hover:border-rust/20 rounded p-1.5 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -247,6 +291,42 @@ export default function JobHistoryTab({ apiBaseUrl }) {
           </table>
         </div>
       </Card>
+
+      {/* ── Permanent-delete confirmation modal ─────────────────────────── */}
+      {deleteModal.open && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-charcoal">Permanently Delete Cancelled Job</h3>
+            <p className="text-sm text-fog">
+              Are you sure you want to permanently delete job{' '}
+              <span className="font-semibold text-charcoal">{deleteModal.job?.jobCode}</span>?
+              This cannot be undone.
+            </p>
+            {deleteError && (
+              <div className="px-3 py-2 text-sm font-medium text-rust bg-rust/10 border border-rust/20 rounded-md">
+                {deleteError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setDeleteModal({ open: false, job: null }); setDeleteError(''); }}
+                className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={handleDeleteConfirm}
+                className="px-4 py-2 bg-rust hover:opacity-90 text-white rounded-lg text-sm font-medium transition-opacity disabled:opacity-50"
+              >
+                {deleteLoading ? 'Deleting…' : 'Permanently Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

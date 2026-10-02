@@ -410,6 +410,36 @@ public class SawmillController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // DELETE api/Sawmill/jobs/{id}
+    // Admin only — permanently deletes a CANCELLED saw job and its allocation /
+    // worker rows. InProgress or Completed jobs are rejected (use cancel/revert
+    // flows instead), preserving their audit trail.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpDelete("jobs/{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteCancelledJob(int id)
+    {
+        var job = await _repository.GetJobByIdAsync(id);
+        if (job == null)
+        {
+            return NotFound(new { message = "Job not found." });
+        }
+
+        if (job.Status != "Cancelled")
+        {
+            return Conflict(new { message = "Only cancelled jobs can be permanently deleted." });
+        }
+
+        var deleted = await _repository.DeleteCancelledJobAsync(id);
+        if (!deleted)
+        {
+            return Conflict(new { message = "Job could not be deleted (its status may have changed)." });
+        }
+
+        return Ok(new { message = "Cancelled saw job permanently deleted." });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // PUT api/Sawmill/jobs/{id}/revert
     // Admin, Manager, Supervisor — reverts a Completed or Cancelled job back to InProgress.
     // Clears OutputVolumeM3 and WastageM3. Verifies machine is not in use on another job.

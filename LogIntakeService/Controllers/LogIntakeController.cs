@@ -208,12 +208,19 @@ public class LogIntakeController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteSupplier(int id)
     {
-        var deactivated = await _repository.DeactivateSupplierAsync(id);
-        if (!deactivated)
+        try
         {
-            return NotFound(new { message = "Active supplier not found." });
-        }
+            var deleted = await _repository.DeleteSupplierAsync(id);
+            if (!deleted)
+            {
+                return NotFound(new { message = "Supplier not found." });
+            }
 
-        return Ok(new { message = "Supplier marked inactive." });
+            return Ok(new { message = "Supplier permanently deleted." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
     }
 }

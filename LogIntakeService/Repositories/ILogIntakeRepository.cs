@@ -14,6 +14,15 @@ public interface ILogIntakeRepository
     Task<int> AddSupplierAsync(Supplier supplier);
     Task<bool> DeactivateSupplierAsync(int supplierId);
 
+    /// <summary>
+    /// Permanently (hard) deletes a supplier row.
+    /// Delivery-history rule: a supplier that has ANY rows in Deliveries
+    /// referencing it is rejected (InvalidOperationException) so delivery
+    /// history is never orphaned. Active suppliers are also rejected —
+    /// deactivate first. Returns false when the supplier does not exist.
+    /// </summary>
+    Task<bool> DeleteSupplierAsync(int supplierId);
+
     Task<IEnumerable<Species>> GetSpeciesAsync();
     Task<IEnumerable<LogLength>> GetLogLengthsAsync();
     Task<IEnumerable<LogItem>> GetLogsAsync(int? speciesId = null, int? lengthId = null);

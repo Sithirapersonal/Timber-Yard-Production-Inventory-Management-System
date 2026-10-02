@@ -1,3 +1,4 @@
+using LogIntakeService.DTOs;
 using LogIntakeService.Models;
 using LogIntakeService.Repositories;
 using Microsoft.Extensions.Configuration;
@@ -52,5 +53,42 @@ public class SupplierRepositoryTests
 
         // Cleanup: mark inactive so the test database is not polluted
         await repo.DeactivateSupplierAsync(newId);
+    }
+
+    [Fact]
+    public async Task DeleteSupplier_RejectedWhenDeliveryHistoryExists()
+    {
+        var repo = CreateRepository();
+        var uniqueName = $"History Supplier {Guid.NewGuid():N}";
+
+        // Create a supplier and record a delivery against it
+        var supplierId = await repo.AddSupplierAsync(new Supplier
+        {
+            SupplierName = uniqueName,
+            ContactNumber = "+94770001122",
+            Address = "Test Address"
+        });
+
+        var species = (await repo.GetSpeciesAsync()).First();
+        var lengths = (await repo.GetLogLengthsAsync()).First();
+
+        await repo.RecordDeliveryAsync(new TimberDelivery
+        {
+            SupplierId = supplierId,
+            ReceivedBy = 1,
+            LogCount = 1
+        }, new[]
+        {
+            new DeliveryLogEntryDto { SpeciesId = species.SpeciesId, LengthId = lengths.LengthId, GirthFt = 3.5m }
+        });
+
+        // Deactivate it so the inactive guard passes and the delivery-history guard is what fails
+        await repo.DeactivateSupplierAsync(supplierId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repo.DeleteSupplierAsync(supplierId));
+
+        // The supplier must still exist (delete was rejected)
+        var suppliers = (await repo.GetActiveSuppliersAsync(includeInactive: true)).ToList();
+        Assert.Contains(suppliers, s => s.SupplierId == supplierId);
     }
 }

@@ -758,6 +758,68 @@ public class SawmillRepository : ISawmillRepository
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Hard delete, restricted to Cancelled jobs (documented in the interface).
+    // Child rows (SawJobLogs, SawJobWorkers) are deleted first inside the same
+    // transaction so the FK constraints are satisfied and nothing is orphaned.
+    public async Task<bool> DeleteCancelledJobAsync(int sawJobId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            const string checkSql = "SELECT Status FROM SawJobs WHERE SawJobId = @SawJobId;";
+            string? status;
+            await using (var checkCmd = new MySqlCommand(checkSql, connection, transaction))
+            {
+                checkCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+                var result = await checkCmd.ExecuteScalarAsync();
+                status = result is string s ? s : null;
+            }
+
+            if (status is null || status != "Cancelled")
+            {
+                await transaction.RollbackAsync();
+                return false;
+            }
+
+            const string deleteLogs = "DELETE FROM SawJobLogs WHERE SawJobId = @SawJobId;";
+            await using (var logsCmd = new MySqlCommand(deleteLogs, connection, transaction))
+            {
+                logsCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+                await logsCmd.ExecuteNonQueryAsync();
+            }
+
+            const string deleteWorkers = "DELETE FROM SawJobWorkers WHERE SawJobId = @SawJobId;";
+            await using (var workersCmd = new MySqlCommand(deleteWorkers, connection, transaction))
+            {
+                workersCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+                await workersCmd.ExecuteNonQueryAsync();
+            }
+
+            const string deleteJob = "DELETE FROM SawJobs WHERE SawJobId = @SawJobId;";
+            await using (var jobCmd = new MySqlCommand(deleteJob, connection, transaction))
+            {
+                jobCmd.Parameters.AddWithValue("@SawJobId", sawJobId);
+                var rows = await jobCmd.ExecuteNonQueryAsync();
+                if (rows == 0)
+                {
+                    await transaction.RollbackAsync();
+                    return false;
+                }
+            }
+
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────────
 

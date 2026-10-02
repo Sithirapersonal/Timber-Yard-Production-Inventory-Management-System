@@ -185,6 +185,7 @@ export default function SawingPage() {
             recentJobs={recentJobs}
             jobsLoading={jobsLoading}
             jobsError={jobsError}
+            isAdmin={user?.role === 'Admin'}
             onRefreshJobs={fetchRecentJobs}
           />
         )}
@@ -212,7 +213,7 @@ export default function SawingPage() {
         )}
 
         {activeTab === 'history' && (
-          <JobHistoryTab apiBaseUrl={API_BASE_URL} />
+          <JobHistoryTab apiBaseUrl={API_BASE_URL} isAdmin={user?.role === 'Admin'} />
         )}
 
       </div>

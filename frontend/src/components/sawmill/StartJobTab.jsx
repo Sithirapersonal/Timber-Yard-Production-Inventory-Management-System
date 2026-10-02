@@ -30,6 +30,7 @@ export default function StartJobTab({
   jobsLoading,
   jobsError,
   onRefreshJobs,
+  isAdmin = false,
 }) {
   // ── Stock selection ────────────────────────────────────────────────────
   const [selectedStockId, setSelectedStockId] = useState('');
@@ -304,6 +305,32 @@ export default function StartJobTab({
   // ── Status change / Cancel / Complete / Revert flows ────────────────────
   const [cancelModal, setCancelModal] = useState({ isOpen: false, job: null });
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
+
+  // Permanent-delete modal for Cancelled jobs (Admin only)
+  const [deleteJobModal, setDeleteJobModal] = useState({ isOpen: false, job: null });
+  const [deleteJobSubmitting, setDeleteJobSubmitting] = useState(false);
+
+  const handleDeleteJobConfirm = async () => {
+    if (!deleteJobModal.job) return;
+    setDeleteJobSubmitting(true);
+    try {
+      const res = await fetchWithAuth(`${apiBaseUrl}/jobs/${deleteJobModal.job.sawJobId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        onNotification('success', `Cancelled job ${deleteJobModal.job.jobCode} permanently deleted.`);
+        setDeleteJobModal({ isOpen: false, job: null });
+        onRefreshJobs?.();
+      } else {
+        const body = await res.json().catch(() => null);
+        onNotification('error', body?.message || 'Failed to delete cancelled job.');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') onNotification('error', 'Network error deleting job.');
+    } finally {
+      setDeleteJobSubmitting(false);
+    }
+  };
 
   const [completeModal, setCompleteModal] = useState({ isOpen: false, job: null });
   const [boardRows, setBoardRows] = useState([
@@ -724,10 +751,33 @@ export default function StartJobTab({
                           {job.assignedWorkerNames?.length ? job.assignedWorkerNames.join(', ') : '—'}
                         </td>
                         <td className="py-3 px-4">
-                          <SawJobStatusPill
-                            status={job.status}
-                            onSelectStatus={(targetStatus) => handleSelectStatus(job, targetStatus)}
-                          />
+                          <div className="flex items-center gap-2">
+                            <SawJobStatusPill
+                              status={job.status}
+                              onSelectStatus={(targetStatus) => handleSelectStatus(job, targetStatus)}
+                            />
+                            {job.status === 'InProgress' && (
+                              <button
+                                type="button"
+                                onClick={() => setCancelModal({ isOpen: true, job })}
+                                className="text-xs px-2.5 py-1 text-rust hover:bg-rust/10 border border-rust/30 rounded-md font-medium transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                            {isAdmin && job.status === 'Cancelled' && (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteJobModal({ isOpen: true, job })}
+                                title="Permanently delete this cancelled job"
+                                className="text-fog hover:text-rust hover:bg-rust/10 border border-transparent hover:border-rust/20 rounded p-1.5 transition-colors"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-fog">
                           {job.startedAt ? new Date(job.startedAt).toLocaleString() : '—'}
@@ -878,6 +928,37 @@ export default function StartJobTab({
               </Button>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* ── Permanent-delete cancelled job confirmation modal ───────────── */}
+      {deleteJobModal.isOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-gray-800">Permanently Delete Cancelled Job</h3>
+            <p className="text-sm text-gray-600">
+              Are you sure you want to permanently delete job{' '}
+              <span className="font-semibold text-gray-800">{deleteJobModal.job?.jobCode}</span>?
+              This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteJobModal({ isOpen: false, job: null })}
+                className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteJobSubmitting}
+                onClick={handleDeleteJobConfirm}
+                className="px-4 py-2 bg-rust text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {deleteJobSubmitting ? 'Deleting…' : 'Permanently Delete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

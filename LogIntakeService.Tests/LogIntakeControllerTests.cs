@@ -184,6 +184,44 @@ public class LogIntakeControllerTests
     }
 
     [Fact]
+    public async Task DeleteSupplier_InactiveSupplierWithoutHistory_ReturnsOk()
+    {
+        _mockRepository
+            .Setup(repo => repo.DeleteSupplierAsync(7))
+            .ReturnsAsync(true);
+
+        var result = await _controller.DeleteSupplier(7);
+
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+    }
+
+    [Fact]
+    public async Task DeleteSupplier_SupplierWithDeliveryHistory_ReturnsConflict()
+    {
+        _mockRepository
+            .Setup(repo => repo.DeleteSupplierAsync(3))
+            .ThrowsAsync(new InvalidOperationException(
+                "Cannot permanently delete a supplier with delivery history."));
+
+        var result = await _controller.DeleteSupplier(3);
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task DeleteSupplier_NonExistingSupplier_ReturnsNotFound()
+    {
+        _mockRepository
+            .Setup(repo => repo.DeleteSupplierAsync(999))
+            .ReturnsAsync(false);
+
+        var result = await _controller.DeleteSupplier(999);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
     public async Task DeactivateSupplier_NonExistingSupplier_ReturnsNotFound()
     {
         _mockRepository
