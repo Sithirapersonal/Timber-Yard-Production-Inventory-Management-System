@@ -136,9 +136,10 @@ export default function LogIntakePage() {
   const fetchSuppliers = async () => {
     setSuppliersLoading(true);
     try {
+      const bust = `_=${Date.now()}`;
       const [activeRes, allRes] = await Promise.all([
-        fetchWithAuth(`${API_BASE_URL}/suppliers`),
-        fetchWithAuth(`${API_BASE_URL}/suppliers?includeInactive=true`)
+        fetchWithAuth(`${API_BASE_URL}/suppliers?${bust}`, { cache: 'no-store' }),
+        fetchWithAuth(`${API_BASE_URL}/suppliers?includeInactive=true&${bust}`, { cache: 'no-store' })
       ]);
 
       if (activeRes.ok) {
@@ -393,7 +394,7 @@ export default function LogIntakePage() {
         fetchSuppliers();
       } else {
         const errData = await res.json().catch(() => null);
-        showNotification('error', errData?.message || 'Failed to create supplier.');
+        showNotification('error', errData?.message || errData?.title || errData?.detail || 'Failed to create supplier.');
       }
     } catch (err) {
       if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error creating supplier.');

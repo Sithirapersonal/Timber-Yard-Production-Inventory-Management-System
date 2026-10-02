@@ -160,6 +160,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpGet("suppliers")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None, Duration = 0)]
     public async Task<IActionResult> GetSuppliers([FromQuery] bool includeInactive = false)
     {
         var suppliers = await _repository.GetActiveSuppliersAsync(includeInactive);
@@ -170,16 +171,24 @@ public class LogIntakeController : ControllerBase
     [Authorize(Roles = "Admin,Manager,Supervisor")]
     public async Task<IActionResult> CreateSupplier([FromBody] CreateSupplierDto dto)
     {
-        var supplier = new Supplier
+        try
         {
-            SupplierName = dto.Name.Trim(),
-            ContactNumber = dto.PhoneNumber.Trim(),
-            Address = dto.Address?.Trim(),
-            IsActive = true
-        };
+            var supplier = new Supplier
+            {
+                SupplierName = dto.Name.Trim(),
+                ContactNumber = dto.PhoneNumber.Trim(),
+                Address = dto.Address?.Trim(),
+                IsActive = true
+            };
 
-        var supplierId = await _repository.AddSupplierAsync(supplier);
-        return StatusCode(StatusCodes.Status201Created, new { supplierId, message = "Supplier created successfully." });
+            var supplierId = await _repository.AddSupplierAsync(supplier);
+            return StatusCode(StatusCodes.Status201Created, new { supplierId, message = "Supplier created successfully." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = $"Failed to create supplier: {ex.Message}" });
+        }
     }
 
     [HttpPut("suppliers/{supplierId:int}/deactivate")]
