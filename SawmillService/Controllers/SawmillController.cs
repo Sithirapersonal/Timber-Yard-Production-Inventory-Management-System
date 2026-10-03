@@ -17,6 +17,7 @@ public class SawmillController : ControllerBase
     private readonly LogIntakeClient _logIntakeClient;
     private readonly KafkaProducerService _kafkaProducer;
     private readonly LogsConsumedProducerService _logsConsumedProducer;
+    private readonly SawnStockProducerService? _sawnStockProducer;
     private readonly ILogger<SawmillController> _logger;
 
     public SawmillController(
@@ -24,13 +25,15 @@ public class SawmillController : ControllerBase
         LogIntakeClient logIntakeClient,
         KafkaProducerService kafkaProducer,
         LogsConsumedProducerService logsConsumedProducer,
-        ILogger<SawmillController> logger)
+        ILogger<SawmillController> logger,
+        SawnStockProducerService? sawnStockProducer = null)
     {
         _repository = repository;
         _logIntakeClient = logIntakeClient;
         _kafkaProducer = kafkaProducer;
         _logsConsumedProducer = logsConsumedProducer;
         _logger = logger;
+        _sawnStockProducer = sawnStockProducer;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -353,6 +356,44 @@ public class SawmillController : ControllerBase
         }
 
         var updatedJob = await _repository.GetJobByIdAsync(id);
+
+        // ── Publish sawn-stock-credited event(s) to TreatmentService via Kafka ──
+        // Fire-and-forget: The job completion is already committed in SawmillDB, so
+        // publish failure must not fail the HTTP 200 response. TreatmentService consumes
+        // from topic 'stock-updates' with deduplication on eventId.
+        if (_sawnStockProducer != null && updatedJob != null)
+        {
+            foreach (var b in dto.Boards)
+            {
+                decimal boardVolFt3 = b.LengthFt * (b.WidthIn / 12m) * (b.ThicknessIn / 12m) * b.Quantity;
+                decimal boardVolM3 = Math.Round(boardVolFt3 * cubicFeetToCubicMeters, 4, MidpointRounding.AwayFromZero);
+                var dimensions = $"{b.ThicknessIn:G29}x{b.WidthIn:G29}x{b.LengthFt:G29}";
+
+                var stockEvt = new SawnStockCreditedEvent
+                {
+                    EventId = Guid.NewGuid().ToString(),
+                    EventType = "sawn-stock-credited",
+                    JobId = updatedJob.SawJobId,
+                    Species = updatedJob.SpeciesName,
+                    Dimensions = dimensions,
+                    VolumeM3 = boardVolM3,
+                    OccurredAt = updatedJob.CompletedAt ?? DateTime.UtcNow
+                };
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _sawnStockProducer.PublishSawnStockCreditedAsync(stockEvt);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to publish sawn-stock-credited event for job {JobId}", updatedJob.SawJobId);
+                    }
+                });
+            }
+        }
+
         return Ok(updatedJob);
     }
 

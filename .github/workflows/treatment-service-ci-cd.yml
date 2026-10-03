@@ -1,0 +1,70 @@
+name: treatment-service-ci-cd
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'TreatmentService/**'
+      - 'TreatmentService.Tests/**'
+      - '.github/workflows/treatment-service-ci-cd.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'TreatmentService/**'
+      - 'TreatmentService.Tests/**'
+      - '.github/workflows/treatment-service-ci-cd.yml'
+
+jobs:
+  build-and-test:
+    name: Build & Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: |
+          dotnet restore TreatmentService/TreatmentService.csproj
+          dotnet restore TreatmentService.Tests/TreatmentService.Tests.csproj
+
+      - name: Build Service
+        run: dotnet build TreatmentService/TreatmentService.csproj --no-restore -c Release
+
+      - name: Build Tests
+        run: dotnet build TreatmentService.Tests/TreatmentService.Tests.csproj --no-restore -c Release
+
+      - name: Run Unit Tests
+        run: dotnet test TreatmentService.Tests/TreatmentService.Tests.csproj --no-build -c Release --verbosity normal
+
+      - name: Verify Docker Build
+        run: docker build -t timber-yard-treatment-service:ci-test -f TreatmentService/Dockerfile .
+
+  deploy:
+    name: Deploy to Azure
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish TreatmentService
+        run: dotnet publish TreatmentService/TreatmentService.csproj -c Release -o TreatmentService/publish
+
+      - name: Deploy to Azure WebApp
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'timber-yard-treatment-service'
+          publish-profile: ${{ secrets.AZURE_TREATMENT_SERVICE_PUBLISH_PROFILE }}
+          package: TreatmentService/publish
