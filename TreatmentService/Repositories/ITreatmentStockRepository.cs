@@ -26,4 +26,22 @@ public interface ITreatmentStockRepository
     /// Checks whether an event with the given eventId has already been processed.
     /// </summary>
     Task<bool> HasEventBeenProcessedAsync(string eventId);
+
+    /// <summary>
+    /// Creates a treatment batch, deducting the requested volume from the species/dimensions
+    /// sawn-stock balance, in a single transaction. Rejects with InvalidOperationException
+    /// when the requested quantity exceeds available stock (no stock changes are made).
+    /// A StockMovements audit row is written alongside. Returns the new BatchId.
+    /// </summary>
+    Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3);
+
+    /// <summary>
+    /// Lists treatment batches, optionally filtered by Status (e.g. Pending, InTreatment, Completed, Cancelled).
+    /// </summary>
+    Task<IEnumerable<TreatmentBatch>> GetBatchesAsync(string? status = null);
+
+    /// <summary>
+    /// Gets a single batch with full detail (tank, cancellation reason, timestamps). Returns null when missing.
+    /// </summary>
+    Task<TreatmentBatch?> GetBatchByIdAsync(int batchId);
 }

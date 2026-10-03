@@ -52,6 +52,18 @@ public class TreatmentStockController : ControllerBase
     }
 
     /// <summary>
+    /// Same as above but using the card’s available-sawn-stock naming per Treat.2 DoD
+    /// (GET /api/TreatmentStock/sawn/availability).
+    /// </summary>
+    [HttpGet("sawn/availability")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> GetSawnAvailability()
+    {
+        var stock = await _repository.GetAllStockAsync();
+        return Ok(stock.Select(s => new { s.Species, s.Dimensions, AvailableVolumeM3 = s.VolumeM3 }));
+    }
+
+    /// <summary>
     /// Service health endpoint.
     /// </summary>
     [HttpGet("health")]

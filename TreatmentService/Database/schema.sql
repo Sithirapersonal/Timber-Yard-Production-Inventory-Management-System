@@ -25,11 +25,36 @@ CREATE TABLE IF NOT EXISTS ProcessedEvents (
 
 -- 3. TreatmentBatches Table (Foundation for treatment lifecycle)
 CREATE TABLE IF NOT EXISTS TreatmentBatches (
-    BatchId      INT AUTO_INCREMENT PRIMARY KEY,
-    BatchCode    VARCHAR(20) UNIQUE NOT NULL,
-    ChemicalType VARCHAR(50) NOT NULL,
-    Status       ENUM('Pending','InTreatment','Completed','Cancelled') NOT NULL DEFAULT 'Pending',
-    StartedAt    DATETIME NULL,
-    CompletedAt  DATETIME NULL,
+    BatchId          INT AUTO_INCREMENT PRIMARY KEY,
+    BatchCode        VARCHAR(20) UNIQUE NOT NULL,
+    Species          VARCHAR(50) NOT NULL,
+    Dimensions       VARCHAR(50) NOT NULL,
+    ChemicalType     VARCHAR(50) NOT NULL,
+    QuantityM3       DECIMAL(10,4) NOT NULL,
+    Tank             VARCHAR(50) NULL,
+    CancellationReason VARCHAR(255) NULL,
+    Status           ENUM('Pending','InTreatment','Completed','Cancelled') NOT NULL DEFAULT 'Pending',
+    StartedAt        DATETIME NULL,
+    CompletedAt      DATETIME NULL,
+    CreatedAt        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3b. Migration: add batch detail columns to pre-existing TreatmentBatches tables
+-- (run manually once for DBs created before these columns existed)
+-- ALTER TABLE TreatmentBatches
+--   ADD COLUMN Species VARCHAR(50) NOT NULL DEFAULT '' AFTER BatchCode,
+--   ADD COLUMN Dimensions VARCHAR(50) NOT NULL DEFAULT '' AFTER Species,
+--   ADD COLUMN QuantityM3 DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER ChemicalType,
+--   ADD COLUMN Tank VARCHAR(50) NULL AFTER QuantityM3,
+--   ADD COLUMN CancellationReason VARCHAR(255) NULL AFTER Tank;
+
+-- 4. StockMovements Table — audit log of every sawn-stock credit/deduction
+CREATE TABLE IF NOT EXISTS StockMovements (
+    MovementId   INT AUTO_INCREMENT PRIMARY KEY,
+    Species      VARCHAR(50) NOT NULL,
+    Dimensions   VARCHAR(50) NOT NULL,
+    VolumeM3     DECIMAL(10,4) NOT NULL,
+    MovementType VARCHAR(30) NOT NULL,
+    BatchCode    VARCHAR(20) NULL,
     CreatedAt    DATETIME DEFAULT CURRENT_TIMESTAMP
 );

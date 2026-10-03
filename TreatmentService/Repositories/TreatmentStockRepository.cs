@@ -141,4 +141,157 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         return count > 0;
     }
+
+    public async Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3)
+    {
+        if (string.IsNullOrWhiteSpace(species) || string.IsNullOrWhiteSpace(dimensions) || string.IsNullOrWhiteSpace(chemicalType))
+            throw new ArgumentException("Species, dimensions and chemical type are required.");
+        if (quantityM3 <= 0)
+            throw new ArgumentException("Quantity must be greater than zero.");
+
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            // 1. Check available balance (inside the transaction so concurrent batches can't both pass)
+            const string balanceSql = "SELECT VolumeM3 FROM SawnStock WHERE Species = @Species AND Dimensions = @Dimensions FOR UPDATE;";
+            decimal available;
+            await using (var balanceCmd = new MySqlCommand(balanceSql, connection, transaction))
+            {
+                balanceCmd.Parameters.AddWithValue("@Species", species.Trim());
+                balanceCmd.Parameters.AddWithValue("@Dimensions", dimensions.Trim());
+                var result = await balanceCmd.ExecuteScalarAsync();
+                available = result is null || result is DBNull ? 0m : Convert.ToDecimal(result);
+            }
+
+            if (available < quantityM3)
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException(
+                    $"Insufficient sawn stock for {species} ({dimensions}). Available: {available} m³, requested: {quantityM3} m³.");
+            }
+
+            // 2. Deduct the stock
+            const string deductSql = @"
+                UPDATE SawnStock
+                SET VolumeM3 = VolumeM3 - @Qty, LastUpdated = UTC_TIMESTAMP()
+                WHERE Species = @Species AND Dimensions = @Dimensions;";
+
+            await using (var deductCmd = new MySqlCommand(deductSql, connection, transaction))
+            {
+                deductCmd.Parameters.AddWithValue("@Qty", quantityM3);
+                deductCmd.Parameters.AddWithValue("@Species", species.Trim());
+                deductCmd.Parameters.AddWithValue("@Dimensions", dimensions.Trim());
+                await deductCmd.ExecuteNonQueryAsync();
+            }
+
+            // 3. Generate batch code and insert the batch (created Pending)
+            var batchCode = $"TB-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(100, 999)}";
+
+            const string batchSql = @"
+                INSERT INTO TreatmentBatches (BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Status, CreatedAt)
+                VALUES (@Code, @Species, @Dimensions, @Chemical, @Qty, 'Pending', UTC_TIMESTAMP());
+                SELECT LAST_INSERT_ID();";
+
+            int batchId;
+            await using (var batchCmd = new MySqlCommand(batchSql, connection, transaction))
+            {
+                batchCmd.Parameters.AddWithValue("@Code", batchCode);
+                batchCmd.Parameters.AddWithValue("@Species", species.Trim());
+                batchCmd.Parameters.AddWithValue("@Dimensions", dimensions.Trim());
+                batchCmd.Parameters.AddWithValue("@Chemical", chemicalType.Trim());
+                batchCmd.Parameters.AddWithValue("@Qty", quantityM3);
+                batchId = Convert.ToInt32(await batchCmd.ExecuteScalarAsync());
+            }
+
+            // 4. Log the stock movement
+            const string moveSql = @"
+                INSERT INTO StockMovements (Species, Dimensions, VolumeM3, MovementType, BatchCode, CreatedAt)
+                VALUES (@Species, @Dimensions, @Qty, 'BATCH_DEDUCTION', @Code, UTC_TIMESTAMP());";
+
+            await using (var moveCmd = new MySqlCommand(moveSql, connection, transaction))
+            {
+                moveCmd.Parameters.AddWithValue("@Species", species.Trim());
+                moveCmd.Parameters.AddWithValue("@Dimensions", dimensions.Trim());
+                moveCmd.Parameters.AddWithValue("@Qty", quantityM3);
+                moveCmd.Parameters.AddWithValue("@Code", batchCode);
+                await moveCmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+            return batchId;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<TreatmentBatch>> GetBatchesAsync(string? status = null)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var sql = "SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt FROM TreatmentBatches";
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            sql += " WHERE Status = @Status";
+        }
+        sql += " ORDER BY CreatedAt DESC;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            cmd.Parameters.AddWithValue("@Status", status.Trim());
+        }
+
+        return await ReadBatchesAsync(cmd);
+    }
+
+    public async Task<TreatmentBatch?> GetBatchByIdAsync(int batchId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt
+            FROM TreatmentBatches
+            WHERE BatchId = @BatchId;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@BatchId", batchId);
+
+        var batches = await ReadBatchesAsync(cmd);
+        return batches.FirstOrDefault();
+    }
+
+    private static async Task<List<TreatmentBatch>> ReadBatchesAsync(MySqlCommand cmd)
+    {
+        var list = new List<TreatmentBatch>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            list.Add(new TreatmentBatch
+            {
+                BatchId = reader.GetInt32(reader.GetOrdinal("BatchId")),
+                BatchCode = reader.GetString(reader.GetOrdinal("BatchCode")),
+                Species = reader.GetString(reader.GetOrdinal("Species")),
+                Dimensions = reader.GetString(reader.GetOrdinal("Dimensions")),
+                ChemicalType = reader.GetString(reader.GetOrdinal("ChemicalType")),
+                QuantityM3 = reader.GetDecimal(reader.GetOrdinal("QuantityM3")),
+                Tank = reader.IsDBNull(reader.GetOrdinal("Tank")) ? null : reader.GetString(reader.GetOrdinal("Tank")),
+                CancellationReason = reader.IsDBNull(reader.GetOrdinal("CancellationReason")) ? null : reader.GetString(reader.GetOrdinal("CancellationReason")),
+                Status = reader.GetString(reader.GetOrdinal("Status")),
+                StartedAt = reader.IsDBNull(reader.GetOrdinal("StartedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("StartedAt")),
+                CompletedAt = reader.IsDBNull(reader.GetOrdinal("CompletedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("CompletedAt")),
+                CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"))
+            });
+        }
+
+        return list;
+    }
 }

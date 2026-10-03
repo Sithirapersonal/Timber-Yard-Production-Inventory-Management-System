@@ -335,5 +335,14 @@ public class SawnStockCreditedConsumerTests
                 return Task.FromResult(_processedEvents.Contains(eventId));
             }
         }
+
+        public Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3)
+            => throw new NotImplementedException();
+
+        public Task<IEnumerable<TreatmentService.Models.TreatmentBatch>> GetBatchesAsync(string? status = null)
+            => throw new NotImplementedException();
+
+        public Task<TreatmentService.Models.TreatmentBatch?> GetBatchByIdAsync(int batchId)
+            => throw new NotImplementedException();
     }
 }
