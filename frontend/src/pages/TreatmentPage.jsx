@@ -15,10 +15,11 @@ const STATUS_OPTIONS = ['Pending', 'InTreatment', 'Completed', 'Cancelled'];
 export default function TreatmentPage() {
   const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('stock'); // 'stock' | 'create' | 'batches'
+  const [activeTab, setActiveTab] = useState('stock'); // 'stock' | 'create' | 'batches' | 'tanks'
 
   const [stock, setStock] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [tanks, setTanks] = useState([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [batchesLoading, setBatchesLoading] = useState(false);
   const [notification, setNotification] = useState({ type: '', text: '' });
@@ -29,6 +30,9 @@ export default function TreatmentPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [detailBatch, setDetailBatch] = useState(null);
+  const [startModal, setStartModal] = useState({ open: false, batch: null });
+  const [startTankId, setStartTankId] = useState('');
+  const [startSubmitting, setStartSubmitting] = useState(false);
 
   const showNotification = (type, text) => {
     setNotification({ type, text });
@@ -56,6 +60,46 @@ export default function TreatmentPage() {
       setBatchesLoading(false);
     }
   }, [statusFilter]);
+
+  const fetchTanks = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/Tanks/availability`);
+      if (res.ok) setTanks(await res.json());
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch tanks', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTanks();
+  }, [fetchTanks]);
+
+  const handleStartBatch = async () => {
+    const batch = startModal.batch;
+    if (!batch || !startTankId) return;
+    setStartSubmitting(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/TreatmentBatches/${batch.batchId}/start`, {
+        method: 'PUT',
+        body: JSON.stringify({ tankId: parseInt(startTankId) }),
+      });
+      if (res.ok) {
+        showNotification('success', `Batch ${batch.batchCode} started (InTreatment).`);
+        setStartModal({ open: false, batch: null });
+        setStartTankId('');
+        fetchBatches();
+        fetchTanks();
+        fetchStock();
+      } else {
+        const body = await res.json().catch(() => null);
+        showNotification('error', body?.message || 'Failed to start batch.');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error starting batch.');
+    } finally {
+      setStartSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     fetchStock();
@@ -157,6 +201,7 @@ export default function TreatmentPage() {
             { id: 'stock', label: 'Sawn Stock' },
             { id: 'create', label: '+ Create Batch' },
             { id: 'batches', label: 'Batch History' },
+            { id: 'tanks', label: 'Tank Schedule' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -301,13 +346,14 @@ export default function TreatmentPage() {
                     <th className="py-3 px-4">Quantity (m³)</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Created</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-charcoal/10">
                   {batchesLoading ? (
-                    <tr><td colSpan="7" className="py-6 px-4 text-center text-fog">Loading batches…</td></tr>
+                    <tr><td colSpan="8" className="py-6 px-4 text-center text-fog">Loading batches…</td></tr>
                   ) : batches.length === 0 ? (
-                    <tr><td colSpan="7" className="py-6 px-4 text-center text-fog">No batches found.</td></tr>
+                    <tr><td colSpan="8" className="py-6 px-4 text-center text-fog">No batches found.</td></tr>
                   ) : (
                     batches.map((b) => (
                       <tr key={b.batchId} onClick={() => openDetail(b.batchId)} className="hover:bg-sawdust/40 cursor-pointer transition-colors">
@@ -327,6 +373,59 @@ export default function TreatmentPage() {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-fog">{new Date(b.createdAt).toLocaleString()}</td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          {b.status === 'Pending' && (
+                            <Button
+                              variant="primary"
+                              onClick={(e) => { e.stopPropagation(); setStartModal({ open: true, batch: b }); }}
+                            >
+                              Start Treatment
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
+        {activeTab === 'tanks' && (
+          <Card className="overflow-hidden">
+            <div className="p-4 border-b border-charcoal/10 bg-sawdust/60 flex justify-between items-center">
+              <h2 className="text-base font-semibold text-charcoal">Tank Schedule &amp; Utilization</h2>
+              <Button variant="ghost" onClick={fetchTanks}>Refresh</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-sawdust/60 text-fog border-b border-charcoal/10">
+                  <tr>
+                    <th className="py-3 px-4">Tank</th>
+                    <th className="py-3 px-4">Capacity (m³)</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Current Batch</th>
+                    <th className="py-3 px-4">Quantity (m³)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-charcoal/10">
+                  {tanks.length === 0 ? (
+                    <tr><td colSpan="5" className="py-6 px-4 text-center text-fog">No tanks configured.</td></tr>
+                  ) : (
+                    tanks.map((t) => (
+                      <tr key={t.tankId} className="hover:bg-sawdust/40 transition-colors">
+                        <td className="py-3 px-4 font-mono text-xs font-bold text-charcoal">{t.tankCode}</td>
+                        <td className="py-3 px-4 font-mono text-charcoal">{Number(t.capacityM3).toFixed(4)}</td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
+                            t.status === 'Busy' ? 'bg-heartwood/15 text-heartwood' : 'bg-moss/15 text-moss'
+                          }`}>
+                            {t.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-charcoal">{t.currentBatchCode || '—'}</td>
+                        <td className="py-3 px-4 font-mono text-charcoal">{t.currentBatchQuantityM3 != null ? Number(t.currentBatchQuantityM3).toFixed(4) : '—'}</td>
                       </tr>
                     ))
                   )}
@@ -336,6 +435,46 @@ export default function TreatmentPage() {
           </Card>
         )}
       </div>
+
+      {/* Start Treatment Modal */}
+      {startModal.open && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-charcoal">Start Treatment</h3>
+            <p className="text-sm text-fog">
+              Assign batch <span className="font-semibold text-charcoal font-mono">{startModal.batch?.batchCode}</span>{' '}
+              ({Number(startModal.batch?.quantityM3 ?? 0).toFixed(4)} m³) to a tank.
+            </p>
+            <div>
+              <label className="block text-sm font-semibold text-charcoal mb-1.5">Treatment Tank *</label>
+              <select
+                value={startTankId}
+                onChange={(e) => setStartTankId(e.target.value)}
+                className="w-full px-3 py-2.5 border border-charcoal/20 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+              >
+                <option value="">— Select an idle tank —</option>
+                {tanks.filter((t) => t.status === 'Idle').map((t) => (
+                  <option key={t.tankId} value={t.tankId}>
+                    {t.tankCode} (capacity {Number(t.capacityM3).toFixed(4)} m³)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setStartModal({ open: false, batch: null }); setStartTankId(''); }}
+                className="px-4 py-2 border rounded-lg text-sm text-fog hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <Button onClick={handleStartBatch} disabled={startSubmitting || !startTankId}>
+                {startSubmitting ? 'Starting…' : 'Start Treatment'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Batch Detail Modal */}
       {detailBatch && (

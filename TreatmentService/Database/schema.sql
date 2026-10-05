@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS TreatmentBatches (
     ChemicalType     VARCHAR(50) NOT NULL,
     QuantityM3       DECIMAL(10,4) NOT NULL,
     Tank             VARCHAR(50) NULL,
+    TankId           INT NULL,
     CancellationReason VARCHAR(255) NULL,
     Status           ENUM('Pending','InTreatment','Completed','Cancelled') NOT NULL DEFAULT 'Pending',
     StartedAt        DATETIME NULL,
@@ -47,6 +48,25 @@ CREATE TABLE IF NOT EXISTS TreatmentBatches (
 --   ADD COLUMN QuantityM3 DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER ChemicalType,
 --   ADD COLUMN Tank VARCHAR(50) NULL AFTER QuantityM3,
 --   ADD COLUMN CancellationReason VARCHAR(255) NULL AFTER Tank;
+
+-- 5. Tanks Table — treatment tanks with capacity; a tank can run at most one InTreatment batch at a time
+CREATE TABLE IF NOT EXISTS Tanks (
+    TankId     INT AUTO_INCREMENT PRIMARY KEY,
+    TankCode   VARCHAR(20) UNIQUE NOT NULL,
+    CapacityM3 DECIMAL(10,4) NOT NULL,
+    IsActive   BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- 5b. Migration for pre-existing TreatmentBatches with a plain Tank string column:
+-- ALTER TABLE TreatmentBatches ADD COLUMN TankId INT NULL, ADD CONSTRAINT fk_batches_tank FOREIGN KEY (TankId) REFERENCES Tanks(TankId);
+-- ALTER TABLE TreatmentBatches MODIFY COLUMN Tank VARCHAR(50) NULL;
+
+-- Seed tanks for local development
+INSERT INTO Tanks (TankCode, CapacityM3, IsActive) VALUES
+    ('TANK-A', 10.0000, TRUE),
+    ('TANK-B', 5.0000, TRUE),
+    ('TANK-C', 2.5000, TRUE)
+ON DUPLICATE KEY UPDATE CapacityM3 = VALUES(CapacityM3);
 
 -- 4. StockMovements Table — audit log of every sawn-stock credit/deduction
 CREATE TABLE IF NOT EXISTS StockMovements (

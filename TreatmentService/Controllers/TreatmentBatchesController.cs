@@ -45,6 +45,33 @@ public class TreatmentBatchesController : ControllerBase
     }
 
     /// <summary>
+    /// Assigns a pending batch to a tank and starts treatment.
+    /// </summary>
+    [HttpPut("{id:int}/start")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> StartBatch(int id, [FromBody] StartBatchDto dto)
+    {
+        if (dto.TankId <= 0)
+        {
+            return BadRequest(new { message = "TankId is required." });
+        }
+
+        try
+        {
+            await _repository.StartBatchAsync(id, dto.TankId);
+            return Ok(new { message = "Batch started. Status: InTreatment." });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Lists treatment batches, optionally filtered by ?status=.
     /// </summary>
     [HttpGet]
@@ -77,4 +104,9 @@ public class CreateTreatmentBatchDto
     public string Dimensions { get; set; } = string.Empty;
     public string ChemicalType { get; set; } = string.Empty;
     public decimal QuantityM3 { get; set; }
+}
+
+public class StartBatchDto
+{
+    public int TankId { get; set; }
 }

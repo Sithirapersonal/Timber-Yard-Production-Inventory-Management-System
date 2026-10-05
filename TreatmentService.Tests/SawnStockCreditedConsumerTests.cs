@@ -339,6 +339,12 @@ public class SawnStockCreditedConsumerTests
         public Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3)
             => throw new NotImplementedException();
 
+        public Task<bool> StartBatchAsync(int batchId, int tankId)
+            => throw new NotImplementedException();
+
+        public Task<IEnumerable<TreatmentService.Models.TankAvailability>> GetTanksAvailabilityAsync()
+            => throw new NotImplementedException();
+
         public Task<IEnumerable<TreatmentService.Models.TreatmentBatch>> GetBatchesAsync(string? status = null)
             => throw new NotImplementedException();
 

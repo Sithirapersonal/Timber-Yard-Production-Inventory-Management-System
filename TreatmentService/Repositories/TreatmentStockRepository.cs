@@ -235,7 +235,7 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var sql = "SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt FROM TreatmentBatches";
+        var sql = "SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, TankId, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt FROM TreatmentBatches";
         if (!string.IsNullOrWhiteSpace(status))
         {
             sql += " WHERE Status = @Status";
@@ -257,7 +257,7 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         await connection.OpenAsync();
 
         const string sql = @"
-            SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt
+            SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, TankId, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt
             FROM TreatmentBatches
             WHERE BatchId = @BatchId;";
 
@@ -266,6 +266,151 @@ public class TreatmentStockRepository : ITreatmentStockRepository
 
         var batches = await ReadBatchesAsync(cmd);
         return batches.FirstOrDefault();
+    }
+
+    public async Task<bool> StartBatchAsync(int batchId, int tankId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            // 1. Load the batch
+            decimal quantity = 0m;
+            string status = string.Empty;
+            await using (var batchCmd = new MySqlCommand(
+                "SELECT Status, QuantityM3 FROM TreatmentBatches WHERE BatchId = @BatchId FOR UPDATE;",
+                connection, transaction))
+            {
+                batchCmd.Parameters.AddWithValue("@BatchId", batchId);
+                bool found;
+                await using (var reader = await batchCmd.ExecuteReaderAsync())
+                {
+                    found = await reader.ReadAsync();
+                    if (found)
+                    {
+                        status = reader.GetString(0);
+                        quantity = reader.GetDecimal(1);
+                    }
+                }
+                if (!found)
+                {
+                    await transaction.RollbackAsync();
+                    throw new KeyNotFoundException($"Batch {batchId} not found.");
+                }
+            }
+
+            if (status != "Pending")
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException($"Batch is {status}; only Pending batches can be started.");
+            }
+
+            // 2. Load the tank and validate it
+            decimal capacity = 0m;
+            string tankCode = string.Empty;
+            await using (var tankCmd = new MySqlCommand(
+                "SELECT TankCode, CapacityM3 FROM Tanks WHERE TankId = @TankId AND IsActive = TRUE;",
+                connection, transaction))
+            {
+                tankCmd.Parameters.AddWithValue("@TankId", tankId);
+                bool tankFound;
+                await using (var reader = await tankCmd.ExecuteReaderAsync())
+                {
+                    tankFound = await reader.ReadAsync();
+                    if (tankFound)
+                    {
+                        tankCode = reader.GetString(0);
+                        capacity = reader.GetDecimal(1);
+                    }
+                }
+                if (!tankFound)
+                {
+                    await transaction.RollbackAsync();
+                    throw new KeyNotFoundException($"Tank {tankId} not found or inactive.");
+                }
+            }
+
+            if (quantity > capacity)
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException(
+                    $"Batch quantity {quantity} m³ exceeds tank {tankCode} capacity {capacity} m³.");
+            }
+
+            // 3. Capacity / double-booking guard: no other InTreatment batch on this tank
+            await using (var busyCmd = new MySqlCommand(
+                "SELECT COUNT(1) FROM TreatmentBatches WHERE TankId = @TankId AND Status = 'InTreatment';",
+                connection, transaction))
+            {
+                busyCmd.Parameters.AddWithValue("@TankId", tankId);
+                var busy = Convert.ToInt32(await busyCmd.ExecuteScalarAsync());
+                if (busy > 0)
+                {
+                    await transaction.RollbackAsync();
+                    throw new InvalidOperationException(
+                        $"Tank {tankCode} is busy with another InTreatment batch.");
+                }
+            }
+
+            // 4. Start the batch
+            await using (var startCmd = new MySqlCommand(@"
+                UPDATE TreatmentBatches
+                SET Status = 'InTreatment', StartedAt = UTC_TIMESTAMP(), TankId = @TankId, Tank = @TankCode
+                WHERE BatchId = @BatchId;",
+                connection, transaction))
+            {
+                startCmd.Parameters.AddWithValue("@TankId", tankId);
+                startCmd.Parameters.AddWithValue("@TankCode", tankCode);
+                startCmd.Parameters.AddWithValue("@BatchId", batchId);
+                await startCmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch
+        {
+            try { await transaction.RollbackAsync(); } catch { /* already rolled back */ }
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<TankAvailability>> GetTanksAvailabilityAsync()
+    {
+        var list = new List<TankAvailability>();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            SELECT t.TankId, t.TankCode, t.CapacityM3,
+                   b.BatchId AS CurrentBatchId, b.BatchCode AS CurrentBatchCode, b.QuantityM3 AS CurrentBatchQuantityM3
+            FROM Tanks t
+            LEFT JOIN TreatmentBatches b
+                ON b.TankId = t.TankId AND b.Status = 'InTreatment'
+            WHERE t.IsActive = TRUE
+            ORDER BY t.TankCode ASC;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            var hasBatch = !reader.IsDBNull(reader.GetOrdinal("CurrentBatchId"));
+            list.Add(new TankAvailability
+            {
+                TankId = reader.GetInt32(reader.GetOrdinal("TankId")),
+                TankCode = reader.GetString(reader.GetOrdinal("TankCode")),
+                CapacityM3 = reader.GetDecimal(reader.GetOrdinal("CapacityM3")),
+                Status = hasBatch ? "Busy" : "Idle",
+                CurrentBatchId = hasBatch ? reader.GetInt32(reader.GetOrdinal("CurrentBatchId")) : null,
+                CurrentBatchCode = hasBatch ? reader.GetString(reader.GetOrdinal("CurrentBatchCode")) : null,
+                CurrentBatchQuantityM3 = hasBatch ? reader.GetDecimal(reader.GetOrdinal("CurrentBatchQuantityM3")) : null
+            });
+        }
+
+        return list;
     }
 
     private static async Task<List<TreatmentBatch>> ReadBatchesAsync(MySqlCommand cmd)
@@ -284,6 +429,7 @@ public class TreatmentStockRepository : ITreatmentStockRepository
                 ChemicalType = reader.GetString(reader.GetOrdinal("ChemicalType")),
                 QuantityM3 = reader.GetDecimal(reader.GetOrdinal("QuantityM3")),
                 Tank = reader.IsDBNull(reader.GetOrdinal("Tank")) ? null : reader.GetString(reader.GetOrdinal("Tank")),
+                TankId = reader.IsDBNull(reader.GetOrdinal("TankId")) ? null : reader.GetInt32(reader.GetOrdinal("TankId")),
                 CancellationReason = reader.IsDBNull(reader.GetOrdinal("CancellationReason")) ? null : reader.GetString(reader.GetOrdinal("CancellationReason")),
                 Status = reader.GetString(reader.GetOrdinal("Status")),
                 StartedAt = reader.IsDBNull(reader.GetOrdinal("StartedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("StartedAt")),

@@ -36,6 +36,19 @@ public interface ITreatmentStockRepository
     Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3);
 
     /// <summary>
+    /// Assigns a pending batch to a tank and starts treatment.
+    /// Rejects with InvalidOperationException when: the batch is not Pending,
+    /// the batch quantity exceeds the tank capacity, or the tank is already
+    /// busy with another InTreatment batch. Returns true on success.
+    /// </summary>
+    Task<bool> StartBatchAsync(int batchId, int tankId);
+
+    /// <summary>
+    /// Lists all active tanks with live status (Idle/Busy) and the current batch when busy.
+    /// </summary>
+    Task<IEnumerable<TankAvailability>> GetTanksAvailabilityAsync();
+
+    /// <summary>
     /// Lists treatment batches, optionally filtered by Status (e.g. Pending, InTreatment, Completed, Cancelled).
     /// </summary>
     Task<IEnumerable<TreatmentBatch>> GetBatchesAsync(string? status = null);
