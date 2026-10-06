@@ -14,6 +14,8 @@ public class TreatmentBatch
     public string? Tank { get; set; }
     public int? TankId { get; set; }
     public string? CancellationReason { get; set; }
+    public decimal? TreatedM3 { get; set; }
+    public decimal? RejectedM3 { get; set; }
     public string Status { get; set; } = "Pending";
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
@@ -43,6 +45,19 @@ public class Tank
     public string TankCode { get; set; } = string.Empty;
     public decimal CapacityM3 { get; set; }
     public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// A row in the treated-stock inventory.
+/// </summary>
+public class TreatedStock
+{
+    public int StockId { get; set; }
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public string ChemicalType { get; set; } = string.Empty;
+    public decimal VolumeM3 { get; set; }
+    public DateTime LastUpdated { get; set; }
 }
 
 /// <summary>

@@ -11,9 +11,24 @@ namespace TreatmentService.Tests;
 /// Uses the locally-running MySQL TreatmentDB (same convention as the
 /// supplier/batch integration tests in the other test projects).
 /// </summary>
-public class TreatmentBatchTankTests
+[Collection("TreatmentDbIntegration")]
+public class TreatmentBatchTankTests : IDisposable
 {
     private const string ConnStr = "Server=localhost;Database=TreatmentDB;User=root;Password=;";
+
+    public void Dispose()
+    {
+        // Clean up the rows this test class creates (Species_<guid>), so the DB is not polluted
+        using var conn = new MySqlConnection(ConnStr);
+        conn.Open();
+        using var cmd = new MySqlCommand(
+            "DELETE FROM StockMovements WHERE Species LIKE 'Species\\_%' OR Species LIKE 'TestSpecies\\_%'; " +
+            "DELETE FROM TreatmentBatches WHERE Species LIKE 'Species\\_%' OR Species LIKE 'TestSpecies\\_%'; " +
+            "DELETE FROM SawnStock WHERE Species LIKE 'Species\\_%' OR Species LIKE 'TestSpecies\\_%'; " +
+            "DELETE FROM Tanks WHERE TankCode LIKE 'T%' AND TankCode NOT LIKE 'TANK-%';",
+            conn);
+        cmd.ExecuteNonQuery();
+    }
 
     private static TreatmentStockRepository CreateRepository()
         => new(new ConfigurationBuilder()

@@ -72,6 +72,34 @@ public class TreatmentBatchesController : ControllerBase
     }
 
     /// <summary>
+    /// Marks an InTreatment batch complete, records treated/rejected quantities,
+    /// credits treated stock, and logs a stock movement.
+    /// </summary>
+    [HttpPut("{id:int}/complete")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> CompleteBatch(int id, [FromBody] CompleteBatchDto dto)
+    {
+        if (dto.TreatedM3 < 0 || dto.RejectedM3 < 0)
+        {
+            return BadRequest(new { message = "Treated and rejected quantities cannot be negative." });
+        }
+
+        try
+        {
+            await _repository.CompleteBatchAsync(id, dto.TreatedM3, dto.RejectedM3);
+            return Ok(new { message = "Batch completed. Treated stock credited." });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Lists treatment batches, optionally filtered by ?status=.
     /// </summary>
     [HttpGet]
@@ -109,4 +137,10 @@ public class CreateTreatmentBatchDto
 public class StartBatchDto
 {
     public int TankId { get; set; }
+}
+
+public class CompleteBatchDto
+{
+    public decimal TreatedM3 { get; set; }
+    public decimal RejectedM3 { get; set; }
 }

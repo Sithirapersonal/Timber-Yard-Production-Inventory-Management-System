@@ -52,6 +52,18 @@ public class TreatmentStockController : ControllerBase
     }
 
     /// <summary>
+    /// Treated stock listing per species/dimension/chemical type.
+    /// GET /api/TreatmentStock/treated
+    /// </summary>
+    [HttpGet("treated")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> GetTreatedStock()
+    {
+        var stock = await _repository.GetTreatedStockAsync();
+        return Ok(stock);
+    }
+
+    /// <summary>
     /// Same as above but using the card’s available-sawn-stock naming per Treat.2 DoD
     /// (GET /api/TreatmentStock/sawn/availability).
     /// </summary>

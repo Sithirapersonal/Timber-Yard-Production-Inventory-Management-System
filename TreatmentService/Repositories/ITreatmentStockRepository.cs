@@ -36,6 +36,18 @@ public interface ITreatmentStockRepository
     Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3);
 
     /// <summary>
+    /// Completes an InTreatment batch with treated and rejected quantities.
+    /// Rejects when the batch isn't InTreatment or when treated + rejected exceeds the batch input quantity.
+    /// Credits treated stock and logs a StockMovements row. Returns true on success.
+    /// </summary>
+    Task<bool> CompleteBatchAsync(int batchId, decimal treatedM3, decimal rejectedM3);
+
+    /// <summary>
+    /// Lists treated stock grouped by species/dimension/chemical type.
+    /// </summary>
+    Task<IEnumerable<TreatedStock>> GetTreatedStockAsync();
+
+    /// <summary>
     /// Assigns a pending batch to a tank and starts treatment.
     /// Rejects with InvalidOperationException when: the batch is not Pending,
     /// the batch quantity exceeds the tank capacity, or the tank is already

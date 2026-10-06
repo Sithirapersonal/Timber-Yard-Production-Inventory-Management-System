@@ -20,6 +20,7 @@ export default function TreatmentPage() {
   const [stock, setStock] = useState([]);
   const [batches, setBatches] = useState([]);
   const [tanks, setTanks] = useState([]);
+  const [treatedStock, setTreatedStock] = useState([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [batchesLoading, setBatchesLoading] = useState(false);
   const [notification, setNotification] = useState({ type: '', text: '' });
@@ -33,6 +34,10 @@ export default function TreatmentPage() {
   const [startModal, setStartModal] = useState({ open: false, batch: null });
   const [startTankId, setStartTankId] = useState('');
   const [startSubmitting, setStartSubmitting] = useState(false);
+  const [completeModal, setCompleteModal] = useState({ open: false, batch: null });
+  const [treatedM3, setTreatedM3] = useState('');
+  const [rejectedM3, setRejectedM3] = useState('');
+  const [completeSubmitting, setCompleteSubmitting] = useState(false);
 
   const showNotification = (type, text) => {
     setNotification({ type, text });
@@ -70,9 +75,61 @@ export default function TreatmentPage() {
     }
   }, []);
 
+  const fetchTreatedStock = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/TreatmentStock/treated`);
+      if (res.ok) setTreatedStock(await res.json());
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') console.error('Failed to fetch treated stock', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTanks();
   }, [fetchTanks]);
+
+  useEffect(() => {
+    fetchTreatedStock();
+  }, [fetchTreatedStock]);
+
+  const handleCompleteBatch = async () => {
+    const batch = completeModal.batch;
+    if (!batch) return;
+    const treated = parseFloat(treatedM3);
+    const rejected = parseFloat(rejectedM3 || '0');
+    if (isNaN(treated) || isNaN(rejected) || treated < 0 || rejected < 0) {
+      showNotification('error', 'Enter valid treated and rejected quantities.');
+      return;
+    }
+    if (treated + rejected > Number(batch.quantityM3)) {
+      showNotification('error', `Treated (${treated}) + rejected (${rejected}) exceeds batch input (${batch.quantityM3}) m³.`);
+      return;
+    }
+
+    setCompleteSubmitting(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/TreatmentBatches/${batch.batchId}/complete`, {
+        method: 'PUT',
+        body: JSON.stringify({ treatedM3: treated, rejectedM3: rejected }),
+      });
+      if (res.ok) {
+        showNotification('success', `Batch ${batch.batchCode} completed.`);
+        setCompleteModal({ open: false, batch: null });
+        setTreatedM3('');
+        setRejectedM3('');
+        fetchBatches();
+        fetchTanks();
+        fetchTreatedStock();
+      } else {
+        const body = await res.json().catch(() => null);
+        showNotification('error', body?.message || 'Failed to complete batch.');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error completing batch.');
+    } finally {
+      setCompleteSubmitting(false);
+    }
+  };
 
   const handleStartBatch = async () => {
     const batch = startModal.batch;
@@ -202,6 +259,7 @@ export default function TreatmentPage() {
             { id: 'create', label: '+ Create Batch' },
             { id: 'batches', label: 'Batch History' },
             { id: 'tanks', label: 'Tank Schedule' },
+            { id: 'treated', label: 'Treated Stock' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -382,7 +440,52 @@ export default function TreatmentPage() {
                               Start Treatment
                             </Button>
                           )}
+                          {b.status === 'InTreatment' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setCompleteModal({ open: true, batch: b }); setTreatedM3(String(b.quantityM3)); setRejectedM3('0'); }}
+                              className="px-4 py-2 rounded-md font-medium text-sm transition-colors bg-moss text-white hover:brightness-110 ml-2"
+                            >
+                              Mark Complete
+                            </button>
+                          )}
                         </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
+        {activeTab === 'treated' && (
+          <Card className="overflow-hidden">
+            <div className="p-4 border-b border-charcoal/10 bg-sawdust/60 flex justify-between items-center">
+              <h2 className="text-base font-semibold text-charcoal">Treated Stock Inventory</h2>
+              <Button variant="ghost" onClick={fetchTreatedStock}>Refresh</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-sawdust/60 text-fog border-b border-charcoal/10">
+                  <tr>
+                    <th className="py-3 px-4">Species</th>
+                    <th className="py-3 px-4">Dimensions</th>
+                    <th className="py-3 px-4">Chemical Type</th>
+                    <th className="py-3 px-4">Volume (m³)</th>
+                    <th className="py-3 px-4">Last Updated</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-charcoal/10">
+                  {treatedStock.length === 0 ? (
+                    <tr><td colSpan="5" className="py-6 px-4 text-center text-fog">No treated stock yet.</td></tr>
+                  ) : (
+                    treatedStock.map((s) => (
+                      <tr key={s.stockId} className="hover:bg-sawdust/40 transition-colors">
+                        <td className="py-3 px-4 font-semibold text-charcoal">{s.species}</td>
+                        <td className="py-3 px-4 text-charcoal">{s.dimensions}</td>
+                        <td className="py-3 px-4 text-charcoal">{s.chemicalType}</td>
+                        <td className="py-3 px-4 font-mono text-charcoal">{Number(s.volumeM3).toFixed(4)}</td>
+                        <td className="py-3 px-4 text-fog">{new Date(s.lastUpdated).toLocaleString()}</td>
                       </tr>
                     ))
                   )}
@@ -435,6 +538,53 @@ export default function TreatmentPage() {
           </Card>
         )}
       </div>
+
+      {/* Mark Complete Modal */}
+      {completeModal.open && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-charcoal">Mark Batch Complete</h3>
+            <p className="text-sm text-fog">
+              Finalize batch <span className="font-semibold text-charcoal font-mono">{completeModal.batch?.batchCode}</span>{' '}
+              (input {Number(completeModal.batch?.quantityM3 ?? 0).toFixed(4)} m³).
+            </p>
+            <div>
+              <label className="block text-sm font-semibold text-charcoal mb-1.5">Treated Quantity (m³) *</label>
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                value={treatedM3}
+                onChange={(e) => setTreatedM3(e.target.value)}
+                className="w-full px-3 py-2.5 border border-charcoal/20 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-charcoal mb-1.5">Rejected Quantity (m³)</label>
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                value={rejectedM3}
+                onChange={(e) => setRejectedM3(e.target.value)}
+                className="w-full px-3 py-2.5 border border-charcoal/20 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setCompleteModal({ open: false, batch: null }); setTreatedM3(''); setRejectedM3(''); }}
+                className="px-4 py-2 border rounded-lg text-sm text-fog hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <Button onClick={handleCompleteBatch} disabled={completeSubmitting}>
+                {completeSubmitting ? 'Completing…' : 'Complete Batch'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Start Treatment Modal */}
       {startModal.open && (

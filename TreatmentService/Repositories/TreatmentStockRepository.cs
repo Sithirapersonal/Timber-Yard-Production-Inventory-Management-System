@@ -188,7 +188,7 @@ public class TreatmentStockRepository : ITreatmentStockRepository
             }
 
             // 3. Generate batch code and insert the batch (created Pending)
-            var batchCode = $"TB-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(100, 999)}";
+            var batchCode = $"TB-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(1000, 9999)}";
 
             const string batchSql = @"
                 INSERT INTO TreatmentBatches (BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Status, CreatedAt)
@@ -235,7 +235,7 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var sql = "SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, TankId, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt FROM TreatmentBatches";
+        var sql = "SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, TankId, CancellationReason, TreatedM3, RejectedM3, Status, StartedAt, CompletedAt, CreatedAt FROM TreatmentBatches";
         if (!string.IsNullOrWhiteSpace(status))
         {
             sql += " WHERE Status = @Status";
@@ -257,7 +257,7 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         await connection.OpenAsync();
 
         const string sql = @"
-            SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, TankId, CancellationReason, Status, StartedAt, CompletedAt, CreatedAt
+            SELECT BatchId, BatchCode, Species, Dimensions, ChemicalType, QuantityM3, Tank, TankId, CancellationReason, TreatedM3, RejectedM3, Status, StartedAt, CompletedAt, CreatedAt
             FROM TreatmentBatches
             WHERE BatchId = @BatchId;";
 
@@ -377,6 +377,146 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         }
     }
 
+    public async Task<bool> CompleteBatchAsync(int batchId, decimal treatedM3, decimal rejectedM3)
+    {
+        if (treatedM3 < 0 || rejectedM3 < 0)
+        {
+            throw new ArgumentException("Treated and rejected quantities cannot be negative.");
+        }
+
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            decimal quantity;
+            string status;
+            string species, dimensions, chemicalType;
+
+            await using (var batchCmd = new MySqlCommand(
+                "SELECT Status, QuantityM3, Species, Dimensions, ChemicalType FROM TreatmentBatches WHERE BatchId = @BatchId FOR UPDATE;",
+                connection, transaction))
+            {
+                batchCmd.Parameters.AddWithValue("@BatchId", batchId);
+                bool found;
+                await using (var reader = await batchCmd.ExecuteReaderAsync())
+                {
+                    found = await reader.ReadAsync();
+                    if (found)
+                    {
+                        status = reader.GetString(0);
+                        quantity = reader.GetDecimal(1);
+                        species = reader.GetString(2);
+                        dimensions = reader.GetString(3);
+                        chemicalType = reader.GetString(4);
+                    }
+                    else
+                    {
+                        status = string.Empty; quantity = 0; species = string.Empty; dimensions = string.Empty; chemicalType = string.Empty;
+                    }
+                }
+                if (!found)
+                {
+                    await transaction.RollbackAsync();
+                    throw new KeyNotFoundException($"Batch {batchId} not found.");
+                }
+            }
+
+            if (status != "InTreatment")
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException(
+                    $"Batch is {status}; only InTreatment batches can be completed.");
+            }
+
+            if (treatedM3 + rejectedM3 > quantity)
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException(
+                    $"Treated ({treatedM3}) + rejected ({rejectedM3}) exceeds batch input quantity ({quantity}).");
+            }
+
+            await using (var completeCmd = new MySqlCommand(@"
+                UPDATE TreatmentBatches
+                SET Status = 'Completed', CompletedAt = UTC_TIMESTAMP(), TreatedM3 = @Treated, RejectedM3 = @Rejected
+                WHERE BatchId = @BatchId;", connection, transaction))
+            {
+                completeCmd.Parameters.AddWithValue("@Treated", treatedM3);
+                completeCmd.Parameters.AddWithValue("@Rejected", rejectedM3);
+                completeCmd.Parameters.AddWithValue("@BatchId", batchId);
+                await completeCmd.ExecuteNonQueryAsync();
+            }
+
+            if (treatedM3 > 0)
+            {
+                await using (var creditCmd = new MySqlCommand(@"
+                    INSERT INTO TreatedStock (Species, Dimensions, ChemicalType, VolumeM3, LastUpdated)
+                    VALUES (@Species, @Dimensions, @Chemical, @Treated, UTC_TIMESTAMP())
+                    ON DUPLICATE KEY UPDATE
+                        VolumeM3 = VolumeM3 + VALUES(VolumeM3),
+                        LastUpdated = UTC_TIMESTAMP();", connection, transaction))
+                {
+                    creditCmd.Parameters.AddWithValue("@Species", species);
+                    creditCmd.Parameters.AddWithValue("@Dimensions", dimensions);
+                    creditCmd.Parameters.AddWithValue("@Chemical", chemicalType);
+                    creditCmd.Parameters.AddWithValue("@Treated", treatedM3);
+                    await creditCmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            await using (var moveCmd = new MySqlCommand(@"
+                INSERT INTO StockMovements (Species, Dimensions, VolumeM3, MovementType, BatchCode, CreatedAt)
+                SELECT @Species, @Dimensions, @Treated, 'TREATED_CREDIT', BatchCode, UTC_TIMESTAMP()
+                FROM TreatmentBatches WHERE BatchId = @BatchId;", connection, transaction))
+            {
+                moveCmd.Parameters.AddWithValue("@Species", species);
+                moveCmd.Parameters.AddWithValue("@Dimensions", dimensions);
+                moveCmd.Parameters.AddWithValue("@Treated", treatedM3);
+                moveCmd.Parameters.AddWithValue("@BatchId", batchId);
+                await moveCmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch
+        {
+            try { await transaction.RollbackAsync(); } catch { /* already rolled back */ }
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<TreatedStock>> GetTreatedStockAsync()
+    {
+        var list = new List<TreatedStock>();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            SELECT StockId, Species, Dimensions, ChemicalType, VolumeM3, LastUpdated
+            FROM TreatedStock
+            ORDER BY Species ASC, Dimensions ASC, ChemicalType ASC;";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            list.Add(new TreatedStock
+            {
+                StockId = reader.GetInt32(reader.GetOrdinal("StockId")),
+                Species = reader.GetString(reader.GetOrdinal("Species")),
+                Dimensions = reader.GetString(reader.GetOrdinal("Dimensions")),
+                ChemicalType = reader.GetString(reader.GetOrdinal("ChemicalType")),
+                VolumeM3 = reader.GetDecimal(reader.GetOrdinal("VolumeM3")),
+                LastUpdated = reader.GetDateTime(reader.GetOrdinal("LastUpdated"))
+            });
+        }
+
+        return list;
+    }
+
     public async Task<IEnumerable<TankAvailability>> GetTanksAvailabilityAsync()
     {
         var list = new List<TankAvailability>();
@@ -431,6 +571,8 @@ public class TreatmentStockRepository : ITreatmentStockRepository
                 Tank = reader.IsDBNull(reader.GetOrdinal("Tank")) ? null : reader.GetString(reader.GetOrdinal("Tank")),
                 TankId = reader.IsDBNull(reader.GetOrdinal("TankId")) ? null : reader.GetInt32(reader.GetOrdinal("TankId")),
                 CancellationReason = reader.IsDBNull(reader.GetOrdinal("CancellationReason")) ? null : reader.GetString(reader.GetOrdinal("CancellationReason")),
+                TreatedM3 = reader.IsDBNull(reader.GetOrdinal("TreatedM3")) ? null : reader.GetDecimal(reader.GetOrdinal("TreatedM3")),
+                RejectedM3 = reader.IsDBNull(reader.GetOrdinal("RejectedM3")) ? null : reader.GetDecimal(reader.GetOrdinal("RejectedM3")),
                 Status = reader.GetString(reader.GetOrdinal("Status")),
                 StartedAt = reader.IsDBNull(reader.GetOrdinal("StartedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("StartedAt")),
                 CompletedAt = reader.IsDBNull(reader.GetOrdinal("CompletedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("CompletedAt")),

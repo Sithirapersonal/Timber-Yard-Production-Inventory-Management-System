@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS TreatmentBatches (
     Tank             VARCHAR(50) NULL,
     TankId           INT NULL,
     CancellationReason VARCHAR(255) NULL,
+    TreatedM3        DECIMAL(10,4) NULL,
+    RejectedM3       DECIMAL(10,4) NULL,
     Status           ENUM('Pending','InTreatment','Completed','Cancelled') NOT NULL DEFAULT 'Pending',
     StartedAt        DATETIME NULL,
     CompletedAt      DATETIME NULL,
@@ -48,6 +50,20 @@ CREATE TABLE IF NOT EXISTS TreatmentBatches (
 --   ADD COLUMN QuantityM3 DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER ChemicalType,
 --   ADD COLUMN Tank VARCHAR(50) NULL AFTER QuantityM3,
 --   ADD COLUMN CancellationReason VARCHAR(255) NULL AFTER Tank;
+
+-- 6. TreatedStock Table — treated timber ready for final use, credited on batch completion
+CREATE TABLE IF NOT EXISTS TreatedStock (
+    StockId      INT AUTO_INCREMENT PRIMARY KEY,
+    Species      VARCHAR(50) NOT NULL,
+    Dimensions   VARCHAR(50) NOT NULL,
+    ChemicalType VARCHAR(50) NOT NULL,
+    VolumeM3     DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+    LastUpdated  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT uq_treatedstock_species_dim_chem UNIQUE (Species, Dimensions, ChemicalType)
+);
+
+-- 5b. Migration for pre-existing TreatmentBatches without treated/rejected columns:
+-- ALTER TABLE TreatmentBatches ADD COLUMN TreatedM3 DECIMAL(10,4) NULL, ADD COLUMN RejectedM3 DECIMAL(10,4) NULL;
 
 -- 5. Tanks Table — treatment tanks with capacity; a tank can run at most one InTreatment batch at a time
 CREATE TABLE IF NOT EXISTS Tanks (
