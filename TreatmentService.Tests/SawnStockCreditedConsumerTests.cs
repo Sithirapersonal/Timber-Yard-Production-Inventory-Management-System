@@ -345,6 +345,9 @@ public class SawnStockCreditedConsumerTests
         public Task<bool> CompleteBatchAsync(int batchId, decimal treatedM3, decimal rejectedM3)
             => throw new NotImplementedException();
 
+        public Task<bool> CancelBatchAsync(int batchId, string reason)
+            => throw new NotImplementedException();
+
         public Task<IEnumerable<TreatmentService.Models.TreatedStock>> GetTreatedStockAsync()
             => throw new NotImplementedException();
 

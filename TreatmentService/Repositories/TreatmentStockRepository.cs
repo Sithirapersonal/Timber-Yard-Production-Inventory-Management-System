@@ -377,6 +377,102 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         }
     }
 
+    public async Task<bool> CancelBatchAsync(int batchId, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A cancellation reason is required.", nameof(reason));
+        }
+
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        try
+        {
+            decimal quantity;
+            string status, species, dimensions;
+            await using (var batchCmd = new MySqlCommand(
+                "SELECT Status, QuantityM3, Species, Dimensions FROM TreatmentBatches WHERE BatchId = @BatchId FOR UPDATE;",
+                connection, transaction))
+            {
+                batchCmd.Parameters.AddWithValue("@BatchId", batchId);
+                bool found;
+                await using (var reader = await batchCmd.ExecuteReaderAsync())
+                {
+                    found = await reader.ReadAsync();
+                    if (found)
+                    {
+                        status = reader.GetString(0);
+                        quantity = reader.GetDecimal(1);
+                        species = reader.GetString(2);
+                        dimensions = reader.GetString(3);
+                    }
+                    else
+                    {
+                        status = string.Empty; quantity = 0; species = string.Empty; dimensions = string.Empty;
+                    }
+                }
+                if (!found)
+                {
+                    await transaction.RollbackAsync();
+                    throw new KeyNotFoundException($"Batch {batchId} not found.");
+                }
+            }
+
+            if (status != "Pending")
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException(
+                    $"Batch is {status}; only Pending batches can be cancelled.");
+            }
+
+            await using (var cancelCmd = new MySqlCommand(@"
+                UPDATE TreatmentBatches
+                SET Status = 'Cancelled', CancellationReason = @Reason
+                WHERE BatchId = @BatchId;", connection, transaction))
+            {
+                cancelCmd.Parameters.AddWithValue("@Reason", reason.Trim());
+                cancelCmd.Parameters.AddWithValue("@BatchId", batchId);
+                await cancelCmd.ExecuteNonQueryAsync();
+            }
+
+            // Restore the deducted sawn stock
+            await using (var restoreCmd = new MySqlCommand(@"
+                INSERT INTO SawnStock (Species, Dimensions, VolumeM3, LastUpdated)
+                VALUES (@Species, @Dimensions, @Qty, UTC_TIMESTAMP())
+                ON DUPLICATE KEY UPDATE
+                    VolumeM3 = VolumeM3 + VALUES(VolumeM3),
+                    LastUpdated = UTC_TIMESTAMP();", connection, transaction))
+            {
+                restoreCmd.Parameters.AddWithValue("@Species", species);
+                restoreCmd.Parameters.AddWithValue("@Dimensions", dimensions);
+                restoreCmd.Parameters.AddWithValue("@Qty", quantity);
+                await restoreCmd.ExecuteNonQueryAsync();
+            }
+
+            await using (var moveCmd = new MySqlCommand(@"
+                INSERT INTO StockMovements (Species, Dimensions, VolumeM3, MovementType, BatchCode, CreatedAt)
+                SELECT @Species, @Dimensions, @Qty, 'TREATMENT_CANCELLED', BatchCode, UTC_TIMESTAMP()
+                FROM TreatmentBatches WHERE BatchId = @BatchId;", connection, transaction))
+            {
+                moveCmd.Parameters.AddWithValue("@Species", species);
+                moveCmd.Parameters.AddWithValue("@Dimensions", dimensions);
+                moveCmd.Parameters.AddWithValue("@Qty", quantity);
+                moveCmd.Parameters.AddWithValue("@BatchId", batchId);
+                await moveCmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch
+        {
+            try { await transaction.RollbackAsync(); } catch { /* already rolled back */ }
+            throw;
+        }
+    }
+
     public async Task<bool> CompleteBatchAsync(int batchId, decimal treatedM3, decimal rejectedM3)
     {
         if (treatedM3 < 0 || rejectedM3 < 0)

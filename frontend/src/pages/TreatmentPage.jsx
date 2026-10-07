@@ -38,6 +38,10 @@ export default function TreatmentPage() {
   const [treatedM3, setTreatedM3] = useState('');
   const [rejectedM3, setRejectedM3] = useState('');
   const [completeSubmitting, setCompleteSubmitting] = useState(false);
+  const [cancelModal, setCancelModal] = useState({ open: false, batch: null });
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const isAdmin = user?.role === 'Admin';
 
   const showNotification = (type, text) => {
     setNotification({ type, text });
@@ -128,6 +132,38 @@ export default function TreatmentPage() {
       if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error completing batch.');
     } finally {
       setCompleteSubmitting(false);
+    }
+  };
+
+  const handleCancelBatch = async () => {
+    const batch = cancelModal.batch;
+    if (!batch) return;
+    if (!cancelReason.trim()) {
+      showNotification('error', 'A cancellation reason is required.');
+      return;
+    }
+
+    setCancelSubmitting(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/TreatmentBatches/${batch.batchId}/cancel`, {
+        method: 'PUT',
+        body: JSON.stringify({ reason: cancelReason.trim() }),
+      });
+      if (res.ok) {
+        showNotification('success', `Batch ${batch.batchCode} cancelled. Sawn stock restored.`);
+        setCancelModal({ open: false, batch: null });
+        setCancelReason('');
+        fetchBatches();
+        fetchTanks();
+        fetchStock();
+      } else {
+        const body = await res.json().catch(() => null);
+        showNotification('error', body?.message || 'Failed to cancel batch.');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error cancelling batch.');
+    } finally {
+      setCancelSubmitting(false);
     }
   };
 
@@ -414,7 +450,7 @@ export default function TreatmentPage() {
                     <tr><td colSpan="8" className="py-6 px-4 text-center text-fog">No batches found.</td></tr>
                   ) : (
                     batches.map((b) => (
-                      <tr key={b.batchId} onClick={() => openDetail(b.batchId)} className="hover:bg-sawdust/40 cursor-pointer transition-colors">
+                      <tr key={b.batchId} onClick={() => openDetail(b.batchId)} className={`cursor-pointer transition-colors ${b.status === 'Cancelled' ? 'hover:bg-sawdust/40 bg-gray-50/80 opacity-70' : 'hover:bg-sawdust/40'}`}>
                         <td className="py-3 px-4 font-mono text-xs font-bold text-charcoal">{b.batchCode}</td>
                         <td className="py-3 px-4 text-charcoal">{b.species}</td>
                         <td className="py-3 px-4 text-charcoal">{b.dimensions}</td>
@@ -446,6 +482,14 @@ export default function TreatmentPage() {
                               className="px-4 py-2 rounded-md font-medium text-sm transition-colors bg-moss text-white hover:brightness-110 ml-2"
                             >
                               Mark Complete
+                            </button>
+                          )}
+                          {isAdmin && b.status === 'Pending' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setCancelModal({ open: true, batch: b }); setCancelReason(''); }}
+                              className="px-4 py-2 rounded-md font-medium text-sm transition-colors bg-transparent text-rust border border-rust/40 hover:bg-rust/10 ml-2"
+                            >
+                              Cancel
                             </button>
                           )}
                         </td>
@@ -538,6 +582,47 @@ export default function TreatmentPage() {
           </Card>
         )}
       </div>
+
+      {/* Cancel Batch Modal */}
+      {cancelModal.open && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-charcoal">Cancel Treatment Batch</h3>
+            <p className="text-sm text-fog">
+              Void batch <span className="font-semibold text-charcoal font-mono">{cancelModal.batch?.batchCode}</span>?
+              The allocated sawn stock will be restored to inventory.
+            </p>
+            <div>
+              <label className="block text-sm font-semibold text-charcoal mb-1.5">Cancellation Reason *</label>
+              <input
+                type="text"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                required
+                className="w-full px-3 py-2.5 border border-charcoal/20 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+                placeholder="e.g. Schedule changed by supply chain"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setCancelModal({ open: false, batch: null }); setCancelReason(''); }}
+                className="px-4 py-2 border rounded-lg text-sm text-fog hover:bg-gray-50"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelBatch}
+                disabled={cancelSubmitting || !cancelReason.trim()}
+                className="px-4 py-2 bg-rust hover:brightness-110 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {cancelSubmitting ? 'Cancelling…' : 'Confirm Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mark Complete Modal */}
       {completeModal.open && (

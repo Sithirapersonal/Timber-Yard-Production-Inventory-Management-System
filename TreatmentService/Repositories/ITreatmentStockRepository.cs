@@ -36,6 +36,13 @@ public interface ITreatmentStockRepository
     Task<int> CreateBatchAsync(string species, string dimensions, string chemicalType, decimal quantityM3);
 
     /// <summary>
+    /// Cancels a Pending batch: flips status to Cancelled, restores the allocated
+    /// sawn stock, and logs an audit stock movement (TREATMENT_CANCELLED).
+    /// Rejects with InvalidOperationException for batches that are InTreatment or Completed.
+    /// </summary>
+    Task<bool> CancelBatchAsync(int batchId, string reason);
+
+    /// <summary>
     /// Completes an InTreatment batch with treated and rejected quantities.
     /// Rejects when the batch isn't InTreatment or when treated + rejected exceeds the batch input quantity.
     /// Credits treated stock and logs a StockMovements row. Returns true on success.

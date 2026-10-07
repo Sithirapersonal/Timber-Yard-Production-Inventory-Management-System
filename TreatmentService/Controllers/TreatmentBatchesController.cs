@@ -72,6 +72,34 @@ public class TreatmentBatchesController : ControllerBase
     }
 
     /// <summary>
+    /// Cancels a Pending treatment batch (Admin only). Restores the allocated sawn stock,
+    /// logs a TREATMENT_CANCELLED movement, and stores the cancellation reason.
+    /// </summary>
+    [HttpPut("{id:int}/cancel")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CancelBatch(int id, [FromBody] CancelBatchDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            return BadRequest(new { message = "Cancellation reason is required." });
+        }
+
+        try
+        {
+            await _repository.CancelBatchAsync(id, dto.Reason);
+            return Ok(new { message = "Batch cancelled. Sawn stock restored." });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Marks an InTreatment batch complete, records treated/rejected quantities,
     /// credits treated stock, and logs a stock movement.
     /// </summary>
@@ -143,4 +171,9 @@ public class CompleteBatchDto
 {
     public decimal TreatedM3 { get; set; }
     public decimal RejectedM3 { get; set; }
+}
+
+public class CancelBatchDto
+{
+    public string Reason { get; set; } = string.Empty;
 }
