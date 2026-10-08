@@ -38,6 +38,31 @@ export default function TreatmentPage() {
   const [treatedM3, setTreatedM3] = useState('');
   const [rejectedM3, setRejectedM3] = useState('');
   const [completeSubmitting, setCompleteSubmitting] = useState(false);
+  const [thresholdDrafts, setThresholdDrafts] = useState({});
+
+  const saveThreshold = async (species, dimensions, chemicalType) => {
+    const key = `${species}|${dimensions}|${chemicalType}`;
+    const value = parseFloat(thresholdDrafts[key]);
+    if (isNaN(value) || value < 0) {
+      showNotification('error', 'Enter a non-negative threshold value.');
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/TreatmentStock/treated/threshold`, {
+        method: 'PUT',
+        body: JSON.stringify({ species, dimensions, chemicalType, thresholdM3: value }),
+      });
+      if (res.ok) {
+        showNotification('success', `Threshold for ${species} (${dimensions}, ${chemicalType}) saved to ${value} m³.`);
+        setThresholdDrafts((prev) => ({ ...prev, [key]: '' }));
+      } else {
+        const body = await res.json().catch(() => null);
+        showNotification('error', body?.message || 'Failed to save threshold (Manager only).');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error saving threshold.');
+    }
+  };
   const [cancelModal, setCancelModal] = useState({ open: false, batch: null });
   const [cancelReason, setCancelReason] = useState('');
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
@@ -338,6 +363,26 @@ export default function TreatmentPage() {
                         <td className="py-3 px-4 text-charcoal">{s.dimensions}</td>
                         <td className="py-3 px-4 font-mono text-charcoal">{Number(s.volumeM3).toFixed(4)}</td>
                         <td className="py-3 px-4 text-fog">{new Date(s.lastUpdated).toLocaleString()}</td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            placeholder="e.g. 5.0"
+                            className="w-28 px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+                            value={thresholdDrafts[`${s.species}|${s.dimensions}|${s.chemicalType}`] ?? ''}
+                            onChange={(e) => setThresholdDrafts((prev) => ({ ...prev, [`${s.species}|${s.dimensions}|${s.chemicalType}`]: e.target.value }))}
+                          />
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => saveThreshold(s.species, s.dimensions, s.chemicalType)}
+                            className="px-3 py-1.5 bg-heartwood hover:bg-heartwood-dark text-white rounded-md text-xs font-medium transition-colors"
+                          >
+                            Save
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -517,11 +562,13 @@ export default function TreatmentPage() {
                     <th className="py-3 px-4">Chemical Type</th>
                     <th className="py-3 px-4">Volume (m³)</th>
                     <th className="py-3 px-4">Last Updated</th>
+                    <th className="py-3 px-4">Threshold (m³)</th>
+                    <th className="py-3 px-4 text-right">Threshold</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-charcoal/10">
                   {treatedStock.length === 0 ? (
-                    <tr><td colSpan="5" className="py-6 px-4 text-center text-fog">No treated stock yet.</td></tr>
+                    <tr><td colSpan="7" className="py-6 px-4 text-center text-fog">No treated stock yet.</td></tr>
                   ) : (
                     treatedStock.map((s) => (
                       <tr key={s.stockId} className="hover:bg-sawdust/40 transition-colors">
@@ -530,6 +577,26 @@ export default function TreatmentPage() {
                         <td className="py-3 px-4 text-charcoal">{s.chemicalType}</td>
                         <td className="py-3 px-4 font-mono text-charcoal">{Number(s.volumeM3).toFixed(4)}</td>
                         <td className="py-3 px-4 text-fog">{new Date(s.lastUpdated).toLocaleString()}</td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            placeholder="e.g. 5.0"
+                            className="w-28 px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+                            value={thresholdDrafts[`${s.species}|${s.dimensions}|${s.chemicalType}`] ?? ''}
+                            onChange={(e) => setThresholdDrafts((prev) => ({ ...prev, [`${s.species}|${s.dimensions}|${s.chemicalType}`]: e.target.value }))}
+                          />
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => saveThreshold(s.species, s.dimensions, s.chemicalType)}
+                            className="px-3 py-1.5 bg-heartwood hover:bg-heartwood-dark text-white rounded-md text-xs font-medium transition-colors"
+                          >
+                            Save
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}

@@ -52,6 +52,38 @@ public class TreatmentStockController : ControllerBase
     }
 
     /// <summary>
+    /// Upsert a low-stock threshold for a treated timber grade (Manager only).
+    /// </summary>
+    [HttpPut("treated/threshold")]
+    [Authorize(Roles = "Admin,Manager")]
+    public async Task<IActionResult> SetTreatedThreshold([FromBody] SetThresholdDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Species) || string.IsNullOrWhiteSpace(dto.Dimensions) || string.IsNullOrWhiteSpace(dto.ChemicalType))
+        {
+            return BadRequest(new { message = "Species, dimensions and chemical type are required." });
+        }
+        if (dto.ThresholdM3 < 0)
+        {
+            return BadRequest(new { message = "ThresholdM3 cannot be negative." });
+        }
+
+        await _repository.SetTreatedStockThresholdAsync(dto.Species, dto.Dimensions, dto.ChemicalType, dto.ThresholdM3);
+        return Ok(new { message = "Threshold saved." });
+    }
+
+    /// <summary>
+    /// Evaluates treated stock against thresholds and returns all active low-stock alerts.
+    /// GET /api/TreatmentStock/treated/alerts
+    /// </summary>
+    [HttpGet("treated/alerts")]
+    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    public async Task<IActionResult> GetTreatedAlerts()
+    {
+        var alerts = await _repository.GetTreatedStockAlertsAsync();
+        return Ok(alerts);
+    }
+
+    /// <summary>
     /// Treated stock listing per species/dimension/chemical type.
     /// GET /api/TreatmentStock/treated
     /// </summary>
@@ -84,4 +116,12 @@ public class TreatmentStockController : ControllerBase
     {
         return Ok(new { status = "Healthy", service = "TreatmentService", timestamp = DateTime.UtcNow });
     }
+}
+
+public class SetThresholdDto
+{
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public string ChemicalType { get; set; } = string.Empty;
+    public decimal ThresholdM3 { get; set; }
 }

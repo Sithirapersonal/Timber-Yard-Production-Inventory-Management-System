@@ -55,6 +55,17 @@ public interface ITreatmentStockRepository
     Task<IEnumerable<TreatedStock>> GetTreatedStockAsync();
 
     /// <summary>
+    /// Upserts the low-stock threshold for a treated-stock grade.
+    /// </summary>
+    Task<bool> SetTreatedStockThresholdAsync(string species, string dimensions, string chemicalType, decimal thresholdM3);
+
+    /// <summary>
+    /// Evaluates all thresholds in C# and returns the treated stock rows whose
+    /// volume is below their threshold (each an active low-stock alert).
+    /// </summary>
+    Task<IEnumerable<TreatedStockAlert>> GetTreatedStockAlertsAsync();
+
+    /// <summary>
     /// Assigns a pending batch to a tank and starts treatment.
     /// Rejects with InvalidOperationException when: the batch is not Pending,
     /// the batch quantity exceeds the tank capacity, or the tank is already

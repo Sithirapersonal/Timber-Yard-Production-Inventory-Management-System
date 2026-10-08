@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS TreatmentBatches (
 --   ADD COLUMN Tank VARCHAR(50) NULL AFTER QuantityM3,
 --   ADD COLUMN CancellationReason VARCHAR(255) NULL AFTER Tank;
 
+-- 6. TreatedStockThresholds Table — per-grade threshold: alerts when stock < threshold
+CREATE TABLE IF NOT EXISTS TreatedStockThresholds (
+    Species      VARCHAR(50) NOT NULL,
+    Dimensions   VARCHAR(50) NOT NULL,
+    ChemicalType VARCHAR(50) NOT NULL,
+    ThresholdM3  DECIMAL(10,4) NOT NULL,
+    LastUpdated  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT pk_treatedstockthresholds PRIMARY KEY (Species, Dimensions, ChemicalType)
+);
+
 -- 6. TreatedStock Table — treated timber ready for final use, credited on batch completion
 CREATE TABLE IF NOT EXISTS TreatedStock (
     StockId      INT AUTO_INCREMENT PRIMARY KEY,

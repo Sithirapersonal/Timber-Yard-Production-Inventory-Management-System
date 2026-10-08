@@ -61,6 +61,19 @@ public class TreatedStock
 }
 
 /// <summary>
+/// Low-stock alert for a treated-stock grade.
+/// </summary>
+public class TreatedStockAlert
+{
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public string ChemicalType { get; set; } = string.Empty;
+    public decimal VolumeM3 { get; set; }
+    public decimal ThresholdM3 { get; set; }
+    public string Message => $"{Species} ({Dimensions}, {ChemicalType}) is below threshold: {VolumeM3} m³ remaining (min {ThresholdM3} m³).";
+}
+
+/// <summary>
 /// Tank with live status for the tank schedule / availability endpoint.
 /// Status is "Busy" while an InTreatment batch references it, else "Idle".
 /// </summary>

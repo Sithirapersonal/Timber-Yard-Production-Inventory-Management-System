@@ -351,6 +351,12 @@ public class SawnStockCreditedConsumerTests
         public Task<IEnumerable<TreatmentService.Models.TreatedStock>> GetTreatedStockAsync()
             => throw new NotImplementedException();
 
+        public Task<bool> SetTreatedStockThresholdAsync(string species, string dimensions, string chemicalType, decimal thresholdM3)
+            => throw new NotImplementedException();
+
+        public Task<IEnumerable<TreatmentService.Models.TreatedStockAlert>> GetTreatedStockAlertsAsync()
+            => throw new NotImplementedException();
+
         public Task<IEnumerable<TreatmentService.Models.TankAvailability>> GetTanksAvailabilityAsync()
             => throw new NotImplementedException();
 

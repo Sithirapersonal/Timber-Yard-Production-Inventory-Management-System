@@ -613,6 +613,105 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         return list;
     }
 
+    public async Task<bool> SetTreatedStockThresholdAsync(string species, string dimensions, string chemicalType, decimal thresholdM3)
+    {
+        if (string.IsNullOrWhiteSpace(species) || string.IsNullOrWhiteSpace(dimensions) || string.IsNullOrWhiteSpace(chemicalType))
+        {
+            throw new ArgumentException("Species, dimensions and chemical type are required.");
+        }
+        if (thresholdM3 < 0)
+        {
+            throw new ArgumentException("Threshold cannot be negative.");
+        }
+
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = @"
+            INSERT INTO TreatedStockThresholds (Species, Dimensions, ChemicalType, ThresholdM3, LastUpdated)
+            VALUES (@Species, @Dimensions, @Chemical, @Threshold, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+                ThresholdM3 = VALUES(ThresholdM3),
+                LastUpdated = UTC_TIMESTAMP();";
+
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@Species", species.Trim());
+        cmd.Parameters.AddWithValue("@Dimensions", dimensions.Trim());
+        cmd.Parameters.AddWithValue("@Chemical", chemicalType.Trim());
+        cmd.Parameters.AddWithValue("@Threshold", thresholdM3);
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    /// <summary>
+    /// In-C# low-stock threshold evaluation: load all treated stock rows and all
+    /// thresholds, and build an alert for every grade whose current volume is below
+    /// its saved threshold. Cleared automatically when volume meets or exceeds the
+    /// threshold because the rule is evaluated on every call (no stored alert rows).
+    /// </summary>
+    public async Task<IEnumerable<TreatedStockAlert>> GetTreatedStockAlertsAsync()
+    {
+        var alerts = new List<TreatedStockAlert>();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var thresholds = new List<(string Species, string Dimensions, string ChemicalType, decimal ThresholdM3)>();
+        await using (var threshCmd = new MySqlCommand(
+            "SELECT Species, Dimensions, ChemicalType, ThresholdM3 FROM TreatedStockThresholds;", connection))
+        {
+            await using var reader = await threshCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                thresholds.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetDecimal(3)));
+            }
+        }
+
+        if (thresholds.Count == 0)
+        {
+            return alerts;
+        }
+
+        var stocks = new List<(string Species, string Dimensions, string ChemicalType, decimal VolumeM3)>();
+        await using (var stockCmd = new MySqlCommand(
+            "SELECT Species, Dimensions, ChemicalType, VolumeM3 FROM TreatedStock;", connection))
+        {
+            await using var reader = await stockCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                stocks.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetDecimal(3)));
+            }
+        }
+
+        foreach (var stock in stocks)
+        {
+            var threshold = thresholds.FirstOrDefault(t =>
+                string.Equals(t.Species, stock.Species, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Dimensions, stock.Dimensions, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.ChemicalType, stock.ChemicalType, StringComparison.OrdinalIgnoreCase));
+
+            if (threshold != default && stock.VolumeM3 < threshold.ThresholdM3)
+            {
+                alerts.Add(new TreatedStockAlert
+                {
+                    Species = stock.Species,
+                    Dimensions = stock.Dimensions,
+                    ChemicalType = stock.ChemicalType,
+                    VolumeM3 = stock.VolumeM3,
+                    ThresholdM3 = threshold.ThresholdM3
+                });
+            }
+        }
+
+        return alerts;
+    }
+
     public async Task<IEnumerable<TankAvailability>> GetTanksAvailabilityAsync()
     {
         var list = new List<TankAvailability>();
