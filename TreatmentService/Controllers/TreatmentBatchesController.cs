@@ -139,6 +139,24 @@ public class TreatmentBatchesController : ControllerBase
     }
 
     /// <summary>
+    /// Treatment turnaround / duration report for a date range (Manager/Admin).
+    /// Returns completed batches, active cycles and average turnaround per chemical type.
+    /// GET /api/TreatmentBatches/reports/duration?from=2026-01-01&amp;to=2026-12-31
+    /// </summary>
+    [HttpGet("reports/duration")]
+    [Authorize(Roles = "Admin,Manager")]
+    public async Task<IActionResult> GetDurationReport([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    {
+        if (from.HasValue && to.HasValue && from.Value > to.Value)
+        {
+            return BadRequest(new { message = "From date must be on or before To date." });
+        }
+
+        var report = await _repository.GetDurationReportAsync(from, to);
+        return Ok(report);
+    }
+
+    /// <summary>
     /// Full detail of a single batch — includes tank and cancellation reason where applicable.
     /// </summary>
     [HttpGet("{id:int}")]

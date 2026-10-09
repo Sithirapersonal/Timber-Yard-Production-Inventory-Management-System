@@ -87,4 +87,11 @@ public interface ITreatmentStockRepository
     /// Gets a single batch with full detail (tank, cancellation reason, timestamps). Returns null when missing.
     /// </summary>
     Task<TreatmentBatch?> GetBatchByIdAsync(int batchId);
+
+    /// <summary>
+    /// Builds the treatment turnaround report: completed batches, active cycles and
+    /// average duration per chemical type, filtered by the optional UTC date range.
+    /// Duration calculations are performed in C# from StartedAt/CompletedAt.
+    /// </summary>
+    Task<TreatmentDurationReport> GetDurationReportAsync(DateTime? fromUtc, DateTime? toUtc);
 }

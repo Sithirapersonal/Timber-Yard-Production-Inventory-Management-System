@@ -365,5 +365,8 @@ public class SawnStockCreditedConsumerTests
 
         public Task<TreatmentService.Models.TreatmentBatch?> GetBatchByIdAsync(int batchId)
             => throw new NotImplementedException();
+
+        public Task<TreatmentService.Models.TreatmentDurationReport> GetDurationReportAsync(DateTime? fromUtc, DateTime? toUtc)
+            => throw new NotImplementedException();
     }
 }

@@ -268,6 +268,72 @@ public class TreatmentStockRepository : ITreatmentStockRepository
         return batches.FirstOrDefault();
     }
 
+    /// <summary>
+    /// Treatment turnaround report: filters Completed batches by CompletedAt (within range)
+    /// and InTreatment batches by StartedAt (within range), then computes duration
+    /// statistics per chemical type in C#. An empty range yields an empty report
+    /// (empty state), never an error.
+    /// </summary>
+    public async Task<TreatmentDurationReport> GetDurationReportAsync(DateTime? fromUtc, DateTime? toUtc)
+    {
+        var batches = (await GetBatchesAsync()).ToList();
+
+        var completedInRange = batches
+            .Where(b => b.Status == "Completed" && b.CompletedAt.HasValue && b.StartedAt.HasValue)
+            .Where(b => !fromUtc.HasValue || b.CompletedAt.Value >= fromUtc.Value)
+            .Where(b => !toUtc.HasValue || b.CompletedAt.Value <= toUtc.Value)
+            .ToList();
+
+        var activeInRange = batches
+            .Where(b => b.Status == "InTreatment" && b.StartedAt.HasValue)
+            .Where(b => !fromUtc.HasValue || b.StartedAt.Value >= fromUtc.Value)
+            .Where(b => !toUtc.HasValue || b.StartedAt.Value <= toUtc.Value)
+            .ToList();
+
+        var report = new TreatmentDurationReport
+        {
+            From = fromUtc,
+            To = toUtc,
+            CompletedBatches = completedInRange.Count,
+            ActiveCycles = activeInRange.Count
+        };
+
+        if (completedInRange.Count > 0)
+        {
+            var allDurations = completedInRange
+                .Select(b => (b.CompletedAt!.Value - b.StartedAt!.Value).TotalHours)
+                .Where(h => h >= 0)
+                .ToList();
+
+            if (allDurations.Count > 0)
+            {
+                report.AverageTurnaroundHours = allDurations.Average();
+            }
+
+            report.ByChemicalType = completedInRange
+                .GroupBy(b => b.ChemicalType)
+                .Select(g =>
+                {
+                    var durations = g
+                        .Select(b => (b.CompletedAt!.Value - b.StartedAt!.Value).TotalHours)
+                        .Where(h => h >= 0)
+                        .ToList();
+                    return new ChemicalTypeDuration
+                    {
+                        ChemicalType = g.Key,
+                        CompletedCount = g.Count(),
+                        AverageDurationHours = durations.Count > 0 ? durations.Average() : 0,
+                        MinDurationHours = durations.Count > 0 ? durations.Min() : 0,
+                        MaxDurationHours = durations.Count > 0 ? durations.Max() : 0
+                    };
+                })
+                .OrderByDescending(c => c.AverageDurationHours)
+                .ToList();
+        }
+
+        return report;
+    }
+
     public async Task<bool> StartBatchAsync(int batchId, int tankId)
     {
         await using var connection = new MySqlConnection(_connectionString);

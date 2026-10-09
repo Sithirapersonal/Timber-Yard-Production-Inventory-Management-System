@@ -39,6 +39,10 @@ export default function TreatmentPage() {
   const [rejectedM3, setRejectedM3] = useState('');
   const [completeSubmitting, setCompleteSubmitting] = useState(false);
   const [thresholdDrafts, setThresholdDrafts] = useState({});
+  const [reportRange, setReportRange] = useState({ from: '', to: '' });
+  const [report, setReport] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportLoaded, setReportLoaded] = useState(false);
 
   const saveThreshold = async (species, dimensions, chemicalType) => {
     const key = `${species}|${dimensions}|${chemicalType}`;
@@ -120,6 +124,45 @@ export default function TreatmentPage() {
   useEffect(() => {
     fetchTreatedStock();
   }, [fetchTreatedStock]);
+
+  const fetchReport = async (range) => {
+    const r = range ?? reportRange;
+    setReportLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (r.from) params.set('from', `${r.from}T00:00:00.000Z`);
+      if (r.to) params.set('to', `${r.to}T23:59:59.999Z`);
+      const qs = params.toString();
+      const res = await fetchWithAuth(`${API_BASE_URL}/TreatmentBatches/reports/duration${qs ? `?${qs}` : ''}`);
+      if (res.ok) {
+        setReport(await res.json());
+        setReportLoaded(true);
+      } else {
+        const body = await res.json().catch(() => null);
+        showNotification('error', body?.message || 'Failed to load duration report (Manager/Admin only).');
+      }
+    } catch (err) {
+      if (err.message !== 'SESSION_EXPIRED') showNotification('error', 'Network error loading duration report.');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'reports' && !reportLoaded && !reportLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchReport(reportRange);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, reportLoaded]);
+
+  const applyReportRange = () => {
+    if (reportRange.from && reportRange.to && reportRange.from > reportRange.to) {
+      showNotification('error', 'From date must be on or before To date.');
+      return;
+    }
+    fetchReport(reportRange);
+  };
 
   const handleCompleteBatch = async () => {
     const batch = completeModal.batch;
@@ -321,6 +364,7 @@ export default function TreatmentPage() {
             { id: 'batches', label: 'Batch History' },
             { id: 'tanks', label: 'Tank Schedule' },
             { id: 'treated', label: 'Treated Stock' },
+            ...(['Admin', 'Manager'].includes(user?.role) ? [{ id: 'reports', label: 'Reports' }] : []),
           ].map((tab) => (
             <button
               key={tab.id}
@@ -648,6 +692,138 @@ export default function TreatmentPage() {
             </div>
           </Card>
         )}
+
+        {activeTab === 'reports' && (
+          <Card className="overflow-hidden">
+            <div className="p-4 border-b border-charcoal/10 bg-sawdust/60 flex flex-wrap gap-3 justify-between items-center">
+              <h2 className="text-base font-semibold text-charcoal">Treatment Turnaround &amp; Duration Report</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs font-medium text-fog">From</label>
+                <input
+                  type="date"
+                  value={reportRange.from}
+                  onChange={(e) => setReportRange((prev) => ({ ...prev, from: e.target.value }))}
+                  className="px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+                />
+                <label className="text-xs font-medium text-fog">To</label>
+                <input
+                  type="date"
+                  value={reportRange.to}
+                  onChange={(e) => setReportRange((prev) => ({ ...prev, to: e.target.value }))}
+                  className="px-2 py-1.5 border border-charcoal/20 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-heartwood/40"
+                />
+                <Button variant="primary" onClick={applyReportRange} disabled={reportLoading}>
+                  {reportLoading ? 'Loading…' : 'Apply Range'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    const cleared = { from: '', to: '' };
+                    setReportRange(cleared);
+                    fetchReport(cleared);
+                  }}
+                  disabled={reportLoading}
+                >
+                  All Time
+                </Button>
+              </div>
+            </div>
+
+            {!report ? (
+              <div className="py-10 px-4 text-center text-fog">
+                {reportLoading ? 'Loading report…' : 'No report data yet. Click "All Time" or apply a date range.'}
+              </div>
+            ) : (
+              <div className="p-5 space-y-6">
+                {/* Summary cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <SummaryCard
+                    label="Completed Batches"
+                    value={report.completedBatches}
+                    accent="text-heartwood"
+                  />
+                  <SummaryCard
+                    label="Active Cycles"
+                    value={report.activeCycles}
+                    accent="text-moss"
+                  />
+                  <SummaryCard
+                    label="Avg Turnaround (h)"
+                    value={report.averageTurnaroundHours != null ? Number(report.averageTurnaroundHours).toFixed(2) : '—'}
+                    accent="text-rust"
+                  />
+                </div>
+
+                {report.completedBatches === 0 ? (
+                  <div className="py-8 px-4 rounded-lg border border-dashed border-charcoal/20 bg-sawdust/40 text-center">
+                    <p className="font-medium text-charcoal">No completed batches in the selected range.</p>
+                    <p className="text-sm text-fog mt-1">
+                      Adjust the date range to include completed treatment cycles.
+                      {report.activeCycles > 0 && ` (${report.activeCycles} active cycle${report.activeCycles === 1 ? '' : 's'} currently in treatment.)`}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Comparison chart: average turnaround per chemical type */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-charcoal mb-3">Average Turnaround by Chemical Type (hours)</h3>
+                      <div className="space-y-2.5">
+                        {report.byChemicalType.map((c) => {
+                          const maxAvg = Math.max(...report.byChemicalType.map((x) => x.averageDurationHours), 0.0001);
+                          const pct = Math.max(4, (c.averageDurationHours / maxAvg) * 100);
+                          return (
+                            <div key={c.chemicalType} className="flex items-center gap-3">
+                              <span className="w-56 shrink-0 text-xs text-charcoal truncate" title={c.chemicalType}>
+                                {c.chemicalType}
+                              </span>
+                              <div className="flex-1 bg-sawdust rounded-md h-6 overflow-hidden">
+                                <div
+                                  className="h-6 bg-heartwood/80 rounded-md flex items-center justify-end pr-2 transition-all"
+                                  style={{ width: `${pct}%` }}
+                                >
+                                  <span className="text-[10px] font-mono font-semibold text-white whitespace-nowrap">
+                                    {c.averageDurationHours.toFixed(2)}h
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="w-20 text-right text-xs font-mono text-fog">{c.completedCount} batch{c.completedCount === 1 ? '' : 'es'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Detail table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-sawdust/60 text-fog border-b border-charcoal/10">
+                          <tr>
+                            <th className="py-3 px-4">Chemical Type</th>
+                            <th className="py-3 px-4">Completed</th>
+                            <th className="py-3 px-4">Avg Duration (h)</th>
+                            <th className="py-3 px-4">Min (h)</th>
+                            <th className="py-3 px-4">Max (h)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-charcoal/10">
+                          {report.byChemicalType.map((c) => (
+                            <tr key={c.chemicalType} className="hover:bg-sawdust/40 transition-colors">
+                              <td className="py-3 px-4 font-semibold text-charcoal">{c.chemicalType}</td>
+                              <td className="py-3 px-4 font-mono text-charcoal">{c.completedCount}</td>
+                              <td className="py-3 px-4 font-mono text-charcoal">{c.averageDurationHours.toFixed(2)}</td>
+                              <td className="py-3 px-4 font-mono text-charcoal">{c.minDurationHours.toFixed(2)}</td>
+                              <td className="py-3 px-4 font-mono text-charcoal">{c.maxDurationHours.toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </Card>
+        )}
       </div>
 
       {/* Cancel Batch Modal */}
@@ -805,5 +981,14 @@ export default function TreatmentPage() {
         </div>
       )}
     </Layout>
+  );
+}
+
+function SummaryCard({ label, value, accent }) {
+  return (
+    <Card className="p-4">
+      <p className="text-xs font-medium text-fog uppercase tracking-wide">{label}</p>
+      <p className={`font-display text-3xl font-semibold mt-1 ${accent}`}>{value}</p>
+    </Card>
   );
 }
