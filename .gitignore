@@ -32,3 +32,4 @@ mint_report.txt
 
 # DB export snapshots (real data, not source)
 AuthDB_export.sql
+frontend/.netlify/
