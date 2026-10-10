@@ -1,0 +1,48 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [develop, main]
+    paths: ['frontend/**', '.github/workflows/frontend-ci-cd.yml']
+  workflow_dispatch:
+
+env:
+  VITE_API_URL: https://timber-yard-auth-service.azurewebsites.net
+  VITE_SAWMILL_API_URL: https://timber-yard-sawmill-service.azurewebsites.net/api/Sawmill
+  VITE_LOG_INTAKE_API_URL: https://timber-yard-log-intake-service.azurewebsites.net/api/LogIntake
+  VITE_TREATMENT_API_URL: https://timber-yard-treatment-service.azurewebsites.net/api
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - run: npx --yes netlify-cli deploy --prod --dir=dist --no-build
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
