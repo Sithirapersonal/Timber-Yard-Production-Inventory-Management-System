@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS ProcessedEvents (
 -- 3. TreatmentBatches Table (Foundation for treatment lifecycle)
 CREATE TABLE IF NOT EXISTS TreatmentBatches (
     BatchId          INT AUTO_INCREMENT PRIMARY KEY,
-    BatchCode        VARCHAR(20) UNIQUE NOT NULL,
+    BatchCode        VARCHAR(30) UNIQUE NOT NULL,
     Species          VARCHAR(50) NOT NULL,
     Dimensions       VARCHAR(50) NOT NULL,
     ChemicalType     VARCHAR(50) NOT NULL,
@@ -101,6 +101,6 @@ CREATE TABLE IF NOT EXISTS StockMovements (
     Dimensions   VARCHAR(50) NOT NULL,
     VolumeM3     DECIMAL(10,4) NOT NULL,
     MovementType VARCHAR(30) NOT NULL,
-    BatchCode    VARCHAR(20) NULL,
+    BatchCode    VARCHAR(30) NULL,
     CreatedAt    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
