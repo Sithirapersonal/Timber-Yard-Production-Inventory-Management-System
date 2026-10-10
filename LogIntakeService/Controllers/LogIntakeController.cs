@@ -160,6 +160,7 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpGet("suppliers")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None, Duration = 0)]
     public async Task<IActionResult> GetSuppliers([FromQuery] bool includeInactive = false)
     {
         var suppliers = await _repository.GetActiveSuppliersAsync(includeInactive);
@@ -170,16 +171,24 @@ public class LogIntakeController : ControllerBase
     [Authorize(Roles = "Admin,Manager,Supervisor")]
     public async Task<IActionResult> CreateSupplier([FromBody] CreateSupplierDto dto)
     {
-        var supplier = new Supplier
+        try
         {
-            SupplierName = dto.Name.Trim(),
-            ContactNumber = dto.PhoneNumber.Trim(),
-            Address = dto.Address?.Trim(),
-            IsActive = true
-        };
+            var supplier = new Supplier
+            {
+                SupplierName = dto.Name.Trim(),
+                ContactNumber = dto.PhoneNumber.Trim(),
+                Address = dto.Address?.Trim(),
+                IsActive = true
+            };
 
-        var supplierId = await _repository.AddSupplierAsync(supplier);
-        return StatusCode(StatusCodes.Status201Created, new { supplierId, message = "Supplier created successfully." });
+            var supplierId = await _repository.AddSupplierAsync(supplier);
+            return StatusCode(StatusCodes.Status201Created, new { supplierId, message = "Supplier created successfully." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = $"Failed to create supplier: {ex.Message}" });
+        }
     }
 
     [HttpPut("suppliers/{supplierId:int}/deactivate")]
@@ -195,16 +204,36 @@ public class LogIntakeController : ControllerBase
         return Ok(new { message = "Supplier deactivated successfully." });
     }
 
+    [HttpPut("suppliers/{id:int}/reactivate")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ReactivateSupplier(int id)
+    {
+        var reactivated = await _repository.ReactivateSupplierAsync(id);
+        if (!reactivated)
+        {
+            return NotFound(new { message = "Inactive supplier not found." });
+        }
+
+        return Ok(new { message = "Supplier reactivated successfully." });
+    }
+
     [HttpDelete("suppliers/{id:int}")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteSupplier(int id)
     {
-        var deactivated = await _repository.DeactivateSupplierAsync(id);
-        if (!deactivated)
+        try
         {
-            return NotFound(new { message = "Active supplier not found." });
-        }
+            var deleted = await _repository.DeleteSupplierAsync(id);
+            if (!deleted)
+            {
+                return NotFound(new { message = "Supplier not found." });
+            }
 
-        return Ok(new { message = "Supplier marked inactive." });
+            return Ok(new { message = "Supplier permanently deleted." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
     }
 }

@@ -52,6 +52,15 @@ public interface ISawmillRepository
     // Job cancellation (Admin only)
     Task<bool> CancelJobAsync(int sawJobId);
 
+    /// <summary>
+    /// Permanently (hard) deletes a saw job. Only jobs in 'Cancelled' status
+    /// are eligible — returns false for any other status or missing job.
+    /// Related SawJobLogs and SawJobWorkers rows are removed first (same
+    /// transaction) so no orphaned allocations remain. InProgress/Completed
+    /// jobs must never be hard-deleted.
+    /// </summary>
+    Task<bool> DeleteCancelledJobAsync(int sawJobId);
+
     // Job-code generation helper
     Task<string> GenerateNextJobCodeAsync();
 }

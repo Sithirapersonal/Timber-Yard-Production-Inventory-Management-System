@@ -84,6 +84,11 @@ builder.Services.AddSingleton(new KafkaProducerService(kafkaBootstrapServers, ka
 var logsConsumedTopic = builder.Configuration["Kafka:LogsConsumedTopic"] ?? "logs-consumed";
 builder.Services.AddSingleton(new LogsConsumedProducerService(kafkaBootstrapServers, logsConsumedTopic));
 
+// Kafka producer for sawn-stock-credited events (job completed -> finished sawn timber
+// credited to TreatmentService). Same singleton pattern.
+var stockUpdatesTopic = builder.Configuration["Kafka:StockUpdatesTopic"] ?? "stock-updates";
+builder.Services.AddSingleton(new SawnStockProducerService(kafkaBootstrapServers, stockUpdatesTopic));
+
 // CORS — same AllowFrontend policy as LogIntakeService (any origin/header/method)
 builder.Services.AddCors(options =>
 {

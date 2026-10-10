@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using LogIntakeService.Controllers;
@@ -184,6 +185,44 @@ public class LogIntakeControllerTests
     }
 
     [Fact]
+    public async Task DeleteSupplier_InactiveSupplierWithoutHistory_ReturnsOk()
+    {
+        _mockRepository
+            .Setup(repo => repo.DeleteSupplierAsync(7))
+            .ReturnsAsync(true);
+
+        var result = await _controller.DeleteSupplier(7);
+
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+    }
+
+    [Fact]
+    public async Task DeleteSupplier_SupplierWithDeliveryHistory_ReturnsConflict()
+    {
+        _mockRepository
+            .Setup(repo => repo.DeleteSupplierAsync(3))
+            .ThrowsAsync(new InvalidOperationException(
+                "Cannot permanently delete a supplier with delivery history."));
+
+        var result = await _controller.DeleteSupplier(3);
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task DeleteSupplier_NonExistingSupplier_ReturnsNotFound()
+    {
+        _mockRepository
+            .Setup(repo => repo.DeleteSupplierAsync(999))
+            .ReturnsAsync(false);
+
+        var result = await _controller.DeleteSupplier(999);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
     public async Task DeactivateSupplier_NonExistingSupplier_ReturnsNotFound()
     {
         _mockRepository
@@ -193,5 +232,48 @@ public class LogIntakeControllerTests
         var result = await _controller.DeactivateSupplier(999);
 
         Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ReactivateSupplier_ExistingSupplier_ReturnsOkResult()
+    {
+        _mockRepository
+            .Setup(repo => repo.ReactivateSupplierAsync(3))
+            .ReturnsAsync(true);
+
+        var result = await _controller.ReactivateSupplier(3);
+
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ReactivateSupplier_NonExistingSupplier_ReturnsNotFound()
+    {
+        _mockRepository
+            .Setup(repo => repo.ReactivateSupplierAsync(999))
+            .ReturnsAsync(false);
+
+        var result = await _controller.ReactivateSupplier(999);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public void ReactivateSupplier_HasAuthorizeAdminAttributeMatchingDeactivate()
+    {
+        var reactivateMethod = typeof(LogIntakeController).GetMethod(nameof(LogIntakeController.ReactivateSupplier));
+        var reactivateAuth = reactivateMethod?.GetCustomAttributes(typeof(AuthorizeAttribute), false)
+            .Cast<AuthorizeAttribute>()
+            .FirstOrDefault();
+
+        var deactivateMethod = typeof(LogIntakeController).GetMethod(nameof(LogIntakeController.DeactivateSupplier));
+        var deactivateAuth = deactivateMethod?.GetCustomAttributes(typeof(AuthorizeAttribute), false)
+            .Cast<AuthorizeAttribute>()
+            .FirstOrDefault();
+
+        Assert.NotNull(reactivateAuth);
+        Assert.NotNull(deactivateAuth);
+        Assert.Equal("Admin", reactivateAuth.Roles);
+        Assert.Equal(deactivateAuth.Roles, reactivateAuth.Roles);
     }
 }

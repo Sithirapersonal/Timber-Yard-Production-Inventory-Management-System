@@ -343,6 +343,64 @@ public class LogIntakeRepository : ILogIntakeRepository
         return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
+    public async Task<bool> ReactivateSupplierAsync(int supplierId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string sql = "UPDATE Suppliers SET IsActive = TRUE WHERE SupplierId = @SupplierId;";
+        await using var cmd = new MySqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    // Hard delete. Delivery-history rule: a supplier referenced by ANY
+    // Deliveries rows can never be hard-deleted (deliveries would lose their
+    // supplier attribution), so it is rejected with InvalidOperationException.
+    // Active suppliers must be deactivated first — also rejected.
+    public async Task<bool> DeleteSupplierAsync(int supplierId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        const string fetchSql = "SELECT IsActive FROM Suppliers WHERE SupplierId = @SupplierId;";
+        bool isActive;
+        await using (var fetchCmd = new MySqlCommand(fetchSql, connection))
+        {
+            fetchCmd.Parameters.AddWithValue("@SupplierId", supplierId);
+            var result = await fetchCmd.ExecuteScalarAsync();
+            if (result is null || result is DBNull)
+            {
+                return false;
+            }
+            isActive = Convert.ToBoolean(result);
+        }
+
+        if (isActive)
+        {
+            throw new InvalidOperationException("Cannot permanently delete an active supplier. Deactivate it first.");
+        }
+
+        const string historySql = "SELECT COUNT(*) FROM Deliveries WHERE SupplierId = @SupplierId;";
+        await using (var historyCmd = new MySqlCommand(historySql, connection))
+        {
+            historyCmd.Parameters.AddWithValue("@SupplierId", supplierId);
+            var count = Convert.ToInt32(await historyCmd.ExecuteScalarAsync());
+            if (count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Cannot permanently delete a supplier with delivery history. Deactivated suppliers with delivery records must be kept for traceability.");
+            }
+        }
+
+        const string deleteSql = "DELETE FROM Suppliers WHERE SupplierId = @SupplierId;";
+        await using var deleteCmd = new MySqlCommand(deleteSql, connection);
+        deleteCmd.Parameters.AddWithValue("@SupplierId", supplierId);
+        var rows = await deleteCmd.ExecuteNonQueryAsync();
+        return rows > 0;
+    }
+
     public async Task<IEnumerable<Species>> GetSpeciesAsync()
     {
         var speciesList = new List<Species>();

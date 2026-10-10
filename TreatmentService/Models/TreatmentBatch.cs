@@ -1,0 +1,89 @@
+namespace TreatmentService.Models;
+
+/// <summary>
+/// A chemical treatment batch allocated from sawn stock.
+/// </summary>
+public class TreatmentBatch
+{
+    public int BatchId { get; set; }
+    public string BatchCode { get; set; } = string.Empty;
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public string ChemicalType { get; set; } = string.Empty;
+    public decimal QuantityM3 { get; set; }
+    public string? Tank { get; set; }
+    public int? TankId { get; set; }
+    public string? CancellationReason { get; set; }
+    public decimal? TreatedM3 { get; set; }
+    public decimal? RejectedM3 { get; set; }
+    public string Status { get; set; } = "Pending";
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Audit row for a sawn-stock in/out movement (credit or treatment-batch deduction).
+/// </summary>
+public class StockMovement
+{
+    public int MovementId { get; set; }
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public decimal VolumeM3 { get; set; }
+    public string MovementType { get; set; } = string.Empty;
+    public string? BatchCode { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// A treatment tank with its capacity.
+/// </summary>
+public class Tank
+{
+    public int TankId { get; set; }
+    public string TankCode { get; set; } = string.Empty;
+    public decimal CapacityM3 { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// A row in the treated-stock inventory.
+/// </summary>
+public class TreatedStock
+{
+    public int StockId { get; set; }
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public string ChemicalType { get; set; } = string.Empty;
+    public decimal VolumeM3 { get; set; }
+    public DateTime LastUpdated { get; set; }
+}
+
+/// <summary>
+/// Low-stock alert for a treated-stock grade.
+/// </summary>
+public class TreatedStockAlert
+{
+    public string Species { get; set; } = string.Empty;
+    public string Dimensions { get; set; } = string.Empty;
+    public string ChemicalType { get; set; } = string.Empty;
+    public decimal VolumeM3 { get; set; }
+    public decimal ThresholdM3 { get; set; }
+    public string Message => $"{Species} ({Dimensions}, {ChemicalType}) is below threshold: {VolumeM3} m³ remaining (min {ThresholdM3} m³).";
+}
+
+/// <summary>
+/// Tank with live status for the tank schedule / availability endpoint.
+/// Status is "Busy" while an InTreatment batch references it, else "Idle".
+/// </summary>
+public class TankAvailability
+{
+    public int TankId { get; set; }
+    public string TankCode { get; set; } = string.Empty;
+    public decimal CapacityM3 { get; set; }
+    public string Status { get; set; } = "Idle";
+    public int? CurrentBatchId { get; set; }
+    public string? CurrentBatchCode { get; set; }
+    public decimal? CurrentBatchQuantityM3 { get; set; }
+}
