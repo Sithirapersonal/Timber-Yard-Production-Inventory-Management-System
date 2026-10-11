@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using LogIntakeService.Repositories;
 using LogIntakeService.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -78,14 +78,11 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "LogIntakeService v1");
-    });
-}
+c.SwaggerEndpoint("/swagger/v1/swagger.json", "LogIntakeService v1");
+});
 
 app.UseCors("AllowFrontend");
 
