@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Confluent.Kafka;
+using Microsoft.Extensions.Logging;
 using SawmillService.Events;
 
 namespace SawmillService.Services;
@@ -17,10 +18,17 @@ public class SawnStockProducerService : IDisposable
     private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
 
     public SawnStockProducerService(string bootstrapServers, string topic)
+        : this(bootstrapServers, topic, null)
+    {
+    }
+
+    public SawnStockProducerService(string bootstrapServers, string topic, ILogger? logger)
     {
         _topic = topic;
-        var config = new ProducerConfig { BootstrapServers = bootstrapServers };
-        _producer = new ProducerBuilder<string, string>(config).Build();
+        var config = KafkaProducerGuard.BuildConfig(bootstrapServers);
+        _producer = new ProducerBuilder<string, string>(config)
+            .AttachGuardedHandlers(logger)
+            .Build();
     }
 
     /// <summary>
@@ -39,7 +47,6 @@ public class SawnStockProducerService : IDisposable
 
     public void Dispose()
     {
-        _producer.Flush(TimeSpan.FromSeconds(5));
-        _producer.Dispose();
+        KafkaProducerGuard.SafeDispose(_producer);
     }
 }

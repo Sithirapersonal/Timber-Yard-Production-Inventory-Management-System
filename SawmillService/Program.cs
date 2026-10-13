@@ -77,17 +77,23 @@ builder.Services.AddHttpClient<LogIntakeClient>(client =>
 // intended to be reused across the app lifetime (do not create one per request).
 var kafkaBootstrapServers = builder.Configuration["Kafka:BootstrapServers"] ?? "localhost:9092";
 var kafkaTopic = builder.Configuration["Kafka:Topic"] ?? "raw-stock-reversed";
-builder.Services.AddSingleton(new KafkaProducerService(kafkaBootstrapServers, kafkaTopic));
+builder.Services.AddSingleton(sp => new KafkaProducerService(
+    kafkaBootstrapServers, kafkaTopic,
+    sp.GetRequiredService<ILogger<KafkaProducerService>>()));
 
 // Kafka producer for logs-consumed events (job started -> allocated logs flipped to
 // Consumed by LogIntakeService). Same singleton pattern as the reversal producer.
 var logsConsumedTopic = builder.Configuration["Kafka:LogsConsumedTopic"] ?? "logs-consumed";
-builder.Services.AddSingleton(new LogsConsumedProducerService(kafkaBootstrapServers, logsConsumedTopic));
+builder.Services.AddSingleton(sp => new LogsConsumedProducerService(
+    kafkaBootstrapServers, logsConsumedTopic,
+    sp.GetRequiredService<ILogger<LogsConsumedProducerService>>()));
 
 // Kafka producer for sawn-stock-credited events (job completed -> finished sawn timber
 // credited to TreatmentService). Same singleton pattern.
 var stockUpdatesTopic = builder.Configuration["Kafka:StockUpdatesTopic"] ?? "stock-updates";
-builder.Services.AddSingleton(new SawnStockProducerService(kafkaBootstrapServers, stockUpdatesTopic));
+builder.Services.AddSingleton(sp => new SawnStockProducerService(
+    kafkaBootstrapServers, stockUpdatesTopic,
+    sp.GetRequiredService<ILogger<SawnStockProducerService>>()));
 
 // CORS â€” same AllowFrontend policy as LogIntakeService (any origin/header/method)
 builder.Services.AddCors(options =>

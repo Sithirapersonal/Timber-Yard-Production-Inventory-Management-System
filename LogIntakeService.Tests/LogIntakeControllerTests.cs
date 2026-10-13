@@ -276,4 +276,32 @@ public class LogIntakeControllerTests
         Assert.Equal("Admin", reactivateAuth.Roles);
         Assert.Equal(deactivateAuth.Roles, reactivateAuth.Roles);
     }
+
+    [Fact]
+    public void CreateSupplier_RequiresAdminRoleLikeRestOfSupplierLifecycle()
+    {
+        // QA fix regression test: supplier creation was open to Manager/Supervisor;
+        // it must be Admin-only, consistent with deactivate/reactivate/delete.
+        var createMethod = typeof(LogIntakeController).GetMethod(nameof(LogIntakeController.CreateSupplier));
+        var createAuth = createMethod?.GetCustomAttributes(typeof(AuthorizeAttribute), false)
+            .Cast<AuthorizeAttribute>()
+            .FirstOrDefault();
+
+        Assert.NotNull(createAuth);
+        Assert.Equal("Admin", createAuth.Roles);
+    }
+
+    [Fact]
+    public void GetSuppliers_HasNoRoleRestriction_AllAuthenticatedUsersCanList()
+    {
+        // Listing suppliers drives the delivery-intake dropdown, so it must stay
+        // open to every authenticated role (only the controller-level [Authorize]
+        // applies) even though creation is Admin-only.
+        var getMethod = typeof(LogIntakeController).GetMethod(nameof(LogIntakeController.GetSuppliers));
+        var getAuth = getMethod?.GetCustomAttributes(typeof(AuthorizeAttribute), false)
+            .Cast<AuthorizeAttribute>()
+            .FirstOrDefault();
+
+        Assert.Null(getAuth);
+    }
 }

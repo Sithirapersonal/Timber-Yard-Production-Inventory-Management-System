@@ -168,7 +168,10 @@ public class LogIntakeController : ControllerBase
     }
 
     [HttpPost("suppliers")]
-    [Authorize(Roles = "Admin,Manager,Supervisor")]
+    // QA fix: creating a supplier is Admin-only, matching the rest of the supplier
+    // lifecycle (deactivate/reactivate/delete are Admin-only). Listing suppliers
+    // stays open to all authenticated roles for the delivery-intake dropdown.
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreateSupplier([FromBody] CreateSupplierDto dto)
     {
         try

@@ -8,7 +8,6 @@ const API_BASE_URL = import.meta.env.VITE_LOG_INTAKE_API_URL || 'http://localhos
 export default function LogIntakePage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
-  const isAuthorizedIntake = ['Admin', 'Manager', 'Supervisor'].includes(user?.role);
 
   const [activeTab, setActiveTab] = useState('stock'); // 'stock', 'logs', 'intake', 'history', 'suppliers'
 
@@ -384,7 +383,7 @@ export default function LogIntakePage() {
     }
   };
 
-  // 9. Create New Supplier Submit (Admin, Manager, Supervisor)
+  // 9. Create New Supplier Submit (Admin only — backend enforces Admin role)
   const handleCreateSupplierSubmit = async (e) => {
     e.preventDefault();
     if (!supplierForm.name.trim() || !supplierForm.phoneNumber.trim()) {
@@ -980,8 +979,9 @@ export default function LogIntakePage() {
         {/* TAB 5: Suppliers Management */}
         {activeTab === 'suppliers' && (
           <div className="space-y-6">
-            {/* Add New Supplier Form */}
-            {isAuthorizedIntake && (
+            {/* Add New Supplier Form (Admin only — creating suppliers is restricted; the
+                suppliers table below stays visible to all roles that can access this tab) */}
+            {isAdmin && (
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 max-w-3xl">
                 <h2 className="text-lg font-semibold text-gray-800 mb-1">Add New Supplier</h2>
                 <p className="text-xs text-gray-500 mb-4">Register a new timber supplier to enable logging their deliveries</p>
