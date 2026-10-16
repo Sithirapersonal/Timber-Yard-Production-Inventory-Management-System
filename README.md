@@ -244,8 +244,8 @@ Pushing to `develop` builds and validates code but does **not** deploy — this 
 | Student ID | Name | Service |
 |---|---|---|
 | IT24103469 | Withanage W.D.D.R | Auth Service |
-| IT24610782 | Munasinghe M.A.V.E | Sawmill Service |
-| IT24103435 | Srinayaka S.P.B.M | Log Intake Service |
+| IT24610782 | Munasinghe M.A.V.E |  Log Intake Service |
+| IT24103435 | Srinayaka S.P.B.M | Sawmill Service |
 | IT24103438 | Hettiarachchi S.S | Treatment Service |
 
 ## Role Rotation
@@ -254,10 +254,10 @@ Each member rotates through all four Scrum roles across the sprint cycle, ensuri
 
 | Sprint | Business Analyst | Developer | QA Engineer | DevOps |
 |---|---|---|---|---|
-| Sprint 1 | IT24610782 | IT24103469 | IT24610782 | IT24103435 |
-| Sprint 2 | IT24103438 | IT24610782 | IT24103469 | IT24103438 |
-| Sprint 3 | IT24103469 | IT24103438 | IT24103435 | IT24610782 |
-| Sprint 4 | IT24103435 | IT24103435 | IT24610782 | IT24103469 |
+| Sprint 1 | IT24610782 | IT24103469 | IT24103435 | IT24103438 |
+| Sprint 2 | IT24103438 | IT24610782 | IT24103469 | IT24103435 |
+| Sprint 3 | IT24103469 | IT24103435 | IT24103438 | IT24610782 |
+| Sprint 4 | IT24103435 | IT24103438 | IT24610782 | IT24103469 |
 
 **Role responsibilities:**
 - **Business Analyst** — writes user stories & acceptance criteria for the sprint
