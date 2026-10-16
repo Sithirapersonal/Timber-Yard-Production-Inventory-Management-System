@@ -105,8 +105,8 @@ The **Auth Service** issues and verifies role-based JWT tokens (Supervisor / Man
 | Service | Owner | Responsibility |
 |---|---|---|
 | **Auth Service** | IT24103469 | User accounts, secure login, role-based access control for all other services |
-| **Log Intake Service** | IT24103435 | Raw log deliveries, supplier tracking, raw stock adjustments |
-| **Sawmill Service** | IT24610782 | Saw jobs, sawn stock output, wastage tracking |
+| **Log Intake Service** | IT24610782 | Raw log deliveries, supplier tracking, raw stock adjustments |
+| **Sawmill Service** | IT24103435 | Saw jobs, sawn stock output, wastage tracking |
 | **Treatment Service** | IT24103438 | Treatment batches, treated stock, turnaround tracking |
 
 Each service owns its own database schema and exposes its own REST endpoints, secured by the JWT issued from the Auth Service and enforced via ASP.NET's `[Authorize(Roles="...")]` attribute.
