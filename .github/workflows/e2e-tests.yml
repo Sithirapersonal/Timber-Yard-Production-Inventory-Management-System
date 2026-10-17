@@ -64,6 +64,9 @@ jobs:
         run: |
           mysql -h 127.0.0.1 -u root TreatmentDB -e "INSERT INTO SawnStock (Species, Dimensions, VolumeM3) VALUES ('E2E-Cedar','2x4',10),('E2E-Teak','2x4',50),('E2E-Oak','2x4',50),('E2E-Elm','2x4',50),('E2E-Pine','2x4',5),('E2E-Fir','2x4',50) ON DUPLICATE KEY UPDATE VolumeM3 = VALUES(VolumeM3);"
 
+      - name: Seed raw stock and machines for sawing tests
+        run: mysql -h 127.0.0.1 -u root < UiTests/Seed/sawing-seed.sql
+
       - name: Seed the three E2E users (bcrypt hash)
         run: |
           cd hash-tool && npm ci
