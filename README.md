@@ -24,4 +24,4 @@ Automated browser tests that drive the React frontend and exercise the Auth, Log
 Configuration is through environment variables: `E2E_BASE_URL`, `E2E_PASSWORD`, `E2E_ADMIN_USER`, `E2E_MANAGER_USER`, `E2E_SUPERVISOR_USER`, `E2E_HEADLESS`.
 
 Test cases: see the test-case table in the project report.
-Owner: <your name> (UI / E2E Testing).
+Owner: Withanage W.D.D.R (IT24103469) (UI / E2E Testing).
