@@ -146,24 +146,22 @@ public class LogIntakeTests : BaseTest
             Assert.DoesNotContain("Delivery recorded successfully", PageText);
         }
 
-    [Fact] // LI-08
-    public void LI08_DeliveryForm_RejectsZeroAndNegativeGirth()
-    {
-        OpenLogIntake(Role.Supervisor);
-        ClickButton("+ Record Delivery");
-        WaitForText("Record New Timber Delivery");
+     [Fact] // LI-08
+     public void LI08_DeliveryForm_RejectsZeroAndNegativeGirth()
+     {
+         OpenLogIntake(Role.Supervisor);
+         ClickButton("+ Record Delivery");
+         WaitForText("Record New Timber Delivery");
 
-        var girth = Field("Girth (ft) *");
-        foreach (var bad in new[] { "0", "-2.5" })
-        {
-            girth.Clear();
-            girth.SendKeys(bad);
-            Assert.True(IsInvalid(girth), $"girth {bad} should be invalid");
-        }
-        girth.Clear();
-        girth.SendKeys("3.5");
-        Assert.False(IsInvalid(girth));
-    }
+         var girth = Field("Girth (ft) *");
+         foreach (var bad in new[] { "0", "-2.5" })
+         {
+             Overtype(girth, bad);
+             Assert.True(IsInvalid(girth), $"girth {bad} should be invalid");
+         }
+         Overtype(girth, "3.5");
+         Assert.False(IsInvalid(girth), "girth 3.5 should be valid");
+     }
 
     [Fact] // LI-09
     public void LI09_DeliveryForm_AddAndRemoveLogRows()

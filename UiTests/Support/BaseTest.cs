@@ -38,9 +38,10 @@ public abstract class BaseTest : IDisposable
             options.AddArgument("--headless=new");
         options.AddArguments("--no-sandbox", "--disable-dev-shm-usage", "--window-size=1920,1080");
 
-        Driver = new ChromeDriver(options);
-        Wait = new WebDriverWait(Driver, TimeSpan.FromSeconds(15));
-    }
+             Driver = new ChromeDriver(options);
+             Wait = new WebDriverWait(Driver, TimeSpan.FromSeconds(15));
+             Wait.IgnoreExceptionTypes(typeof(StaleElementReferenceException));
+         }
 
     public void Dispose()
     {
@@ -96,12 +97,16 @@ public abstract class BaseTest : IDisposable
             $"//label[contains(normalize-space(.),'{label}')]/following-sibling::*[self::input or self::select][1]"))
             .FirstOrDefault(e => e.Displayed))!;
 
-    protected void Type(string label, string value)
-    {
-        var f = Field(label);
-        f.Clear();
-        f.SendKeys(value);
-    }
+        protected void Type(string label, string value) => Overtype(Field(label), value);
+
+        /// <summary>Replaces the contents of an input in a way React notices (Clear() alone can leave stale state).</summary>
+        protected static void Overtype(IWebElement input, string value)
+        {
+            input.Click();
+            input.SendKeys(Keys.Control + "a");
+            input.SendKeys(Keys.Delete);
+            input.SendKeys(value);
+        }
 
     /// <summary>Waits until the dropdown has real options (data loaded from the API), then picks the first one.</summary>
     protected string SelectFirstRealOption(IWebElement select)
