@@ -96,15 +96,18 @@ public class SawingJobTests : BaseTest
 
     private void WaitForRow(By row) => Wait.Until(d => d.FindElements(row).Any());
 
-    private void CancelJob(string machineCode)
-    {
-        ClickStable(By.XPath(JobRowXPath(machineCode, "In Progress") +
-                             "//button[normalize-space(.)='Cancel']"));
-        WaitForText("Are you sure you want to cancel job");
-        ClickButton("Confirm Cancel");
-        WaitForText("cancelled.");
-        WaitForRow(JobRow(machineCode, "Cancelled"));
-    }
+        private void CancelJob(string machineCode)
+        {
+            ClickStable(By.XPath(JobRowXPath(machineCode, "In Progress") +
+                                 "//button[normalize-space(.)='Cancel']"));
+            WaitForText("Are you sure you want to cancel job");
+            ClickButton("Confirm Cancel");
+
+            // The cancel call can be slow in CI, and the success banner only lasts 5 s,
+            // so wait for the row itself to flip to Cancelled, with a longer timeout.
+            new WebDriverWait(Driver, TimeSpan.FromSeconds(60))
+                .Until(d => d.FindElements(JobRow(machineCode, "Cancelled")).Any());
+        }
 
     [Fact] // SAW-07
     public void SAW07_StartJob_HappyPath_CreatesInProgressJob()
