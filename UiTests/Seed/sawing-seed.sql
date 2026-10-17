@@ -10,7 +10,9 @@ FROM Species s JOIN LogLengths l ON l.LengthFt = 10.00
 WHERE s.Name LIKE 'E2E-Saw%';
 
 -- reset: remove logs/delivery from any previous seed run
-DELETE FROM Logs WHERE DeliveryId IN (SELECT DeliveryId FROM Deliveries WHERE Notes = 'E2E-SAW-SEED');
+DELETE FROM Logs WHERE StockId IN (
+  SELECT st.StockId FROM Stock st JOIN Species sp ON sp.SpeciesId = st.SpeciesId
+  WHERE sp.Name LIKE 'E2E-Saw%');
 DELETE FROM Deliveries WHERE Notes = 'E2E-SAW-SEED';
 
 INSERT INTO Deliveries (SupplierId, Species, VolumeM3, VehicleNumber, ReceivedBy, LogCount, Notes)

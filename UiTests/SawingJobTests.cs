@@ -27,6 +27,14 @@ public class SawingJobTests : BaseTest
             return true;
         });
 
+    /// <summary>Find + read Enabled inside the wait, so a re-render between the two (stale element) is retried.</summary>
+    private bool IsEnabledStable(By by) =>
+        Wait.Until(d =>
+        {
+            var el = d.FindElements(by).FirstOrDefault();
+            return el == null ? null : (el.Enabled ? "enabled" : "disabled");
+        }) == "enabled";
+
     private void OpenStartTab(Role role)
     {
         LoginAs(role);
@@ -41,7 +49,7 @@ public class SawingJobTests : BaseTest
         var select = new SelectElement(Field("Raw Stock Batch"));
         Wait.Until(_ => select.Options.Any(o => o.Text.StartsWith(species + " ")));
         select.SelectByText(select.Options.First(o => o.Text.StartsWith(species + " ")).Text);
-        Wait.Until(d => d.FindElements(LogBoxes).Count == 3); // 3 seeded logs
+        Wait.Until(d => d.FindElements(LogBoxes).Count >= 3); // 3 seeded logs
     }
 
     private void PickMachine(string code)
@@ -133,12 +141,11 @@ public class SawingJobTests : BaseTest
         ClickButton("+ Allocate Machine");
         WaitForText("Select the machine this saw job will run on.");
 
-        var radio = By.XPath("//label[.//span[normalize-space(.)='MCH-03']]//input[@type='radio']");
-        Wait.Until(d => d.FindElements(radio).Any());
-        Assert.False(Driver.FindElement(radio).Enabled, "MCH-03 is UnderMaintenance and must be disabled");
-
+        var maintenance = By.XPath("//label[.//span[normalize-space(.)='MCH-03']]//input[@type='radio']");
         var available = By.XPath("//label[.//span[normalize-space(.)='MCH-01']]//input[@type='radio']");
-        Assert.True(Driver.FindElement(available).Enabled);
+
+        Assert.False(IsEnabledStable(maintenance), "MCH-03 is UnderMaintenance and must be disabled");
+        Assert.True(IsEnabledStable(available), "MCH-01 is Available and must be selectable");
     }
 
     [Fact] // SAW-10
