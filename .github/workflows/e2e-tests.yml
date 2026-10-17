@@ -1,0 +1,126 @@
+name: e2e-tests
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [feature/e2e-selenium-tests]   # remove this line before the final merge
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: Selenium E2E (all services + frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      E2E_PASSWORD: E2e@12345
+      E2E_BASE_URL: http://localhost:5173
+      VITE_API_URL: http://localhost:5030
+      VITE_LOG_INTAKE_API_URL: http://localhost:5201/api/LogIntake
+      VITE_SAWMILL_API_URL: http://localhost:5210/api/Sawmill
+      VITE_TREATMENT_API_URL: http://localhost:5000/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Create databases from the project's SQL scripts
+        run: |
+          mysql -h 127.0.0.1 -u root -e "CREATE DATABASE IF NOT EXISTS AuthDB;"
+          mysql -h 127.0.0.1 -u root AuthDB < AuthService/Database/001_CreateUsersTable.sql
+          mysql -h 127.0.0.1 -u root AuthDB < AuthService/Database/002_CreateLoginHistoryTable.sql
+          mysql -h 127.0.0.1 -u root < LogIntakeService/Database/schema.sql
+          mysql -h 127.0.0.1 -u root < SawmillService/Database/schema.sql
+          mysql -h 127.0.0.1 -u root < TreatmentService/Database/schema.sql
+          # Sawmill migration_*.sql files are not applied: check they are needed before adding them
+
+      - name: Seed the three E2E users (bcrypt hash)
+        run: |
+          cd hash-tool && npm ci
+          HASH=$(node --input-type=module -e "import b from 'bcryptjs'; console.log(b.hashSync(process.env.E2E_PASSWORD, 10))")
+          cd ..
+          for entry in "e2e_admin:Admin" "e2e_manager:Manager" "e2e_supervisor:Supervisor"; do
+            mysql -h 127.0.0.1 -u root AuthDB -e \
+              "INSERT INTO Users (Username, PasswordHash, Role) VALUES ('${entry%%:*}', '$HASH', '${entry##*:}');"
+          done
+
+      - name: Build services
+        run: |
+          dotnet build AuthService -c Release
+          dotnet build LogIntakeService -c Release
+          dotnet build SawmillService -c Release
+          dotnet build TreatmentService -c Release
+
+      - name: Start backend services
+        run: |
+          ASPNETCORE_URLS=http://localhost:5030 nohup dotnet run --project AuthService -c Release --no-build --no-launch-profile > auth.log 2>&1 &
+          ASPNETCORE_URLS=http://localhost:5201 nohup dotnet run --project LogIntakeService -c Release --no-build --no-launch-profile > logintake.log 2>&1 &
+          ASPNETCORE_URLS=http://localhost:5210 nohup dotnet run --project SawmillService -c Release --no-build --no-launch-profile > sawmill.log 2>&1 &
+          ASPNETCORE_URLS=http://localhost:5000 nohup dotnet run --project TreatmentService -c Release --no-build --no-launch-profile > treatment.log 2>&1 &
+
+      - name: Build and start frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+          nohup npx vite preview --port 5173 --strictPort > ../frontend.log 2>&1 &
+
+      - name: Wait until everything answers
+        run: |
+          wait_for() {
+            for i in $(seq 1 60); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$1" || true)
+              if [ "$code" != "000" ]; then echo "$1 is up (HTTP $code)"; return 0; fi
+              sleep 3
+            done
+            echo "$1 did not start"; return 1
+          }
+          wait_for http://localhost:5030/auth/login
+          wait_for http://localhost:5201/api/LogIntake
+          wait_for http://localhost:5210/api/Sawmill
+          wait_for http://localhost:5000/api/TreatmentStock
+          wait_for http://localhost:5173
+
+      - name: Build E2E tests
+        run: |
+          dotnet build UiTests -c Release
+          # Remove the pinned ChromeDriver so Selenium Manager picks one matching the runner's Chrome
+          find UiTests/bin -name 'chromedriver*' -delete
+
+      - name: Run Selenium E2E tests (headless)
+        run: dotnet test UiTests -c Release --no-build --logger "trx;LogFileName=e2e.trx" --logger "console;verbosity=normal"
+
+      - name: Upload results and service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            UiTests/TestResults/
+            *.log
