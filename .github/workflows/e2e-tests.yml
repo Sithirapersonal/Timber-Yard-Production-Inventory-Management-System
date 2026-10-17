@@ -60,6 +60,10 @@ jobs:
           mysql -h 127.0.0.1 -u root < TreatmentService/Database/schema.sql
           # Sawmill migration_*.sql files are not applied: check they are needed before adding them
 
+      - name: Seed sawn stock for treatment workflow tests
+        run: |
+          mysql -h 127.0.0.1 -u root TreatmentDB -e "INSERT INTO SawnStock (Species, Dimensions, VolumeM3) VALUES ('E2E-Cedar','2x4',10),('E2E-Teak','2x4',50),('E2E-Oak','2x4',50),('E2E-Elm','2x4',50),('E2E-Pine','2x4',5),('E2E-Fir','2x4',50) ON DUPLICATE KEY UPDATE VolumeM3 = VALUES(VolumeM3);"
+
       - name: Seed the three E2E users (bcrypt hash)
         run: |
           cd hash-tool && npm ci

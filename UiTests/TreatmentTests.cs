@@ -5,6 +5,7 @@ using UiTests.Support;
 namespace UiTests;
 
 /// <summary>Treatment module UI, validation rules and role-based tabs (frontend + Treatment service + TreatmentDB).</summary>
+[Collection("Treatment")]
 public class TreatmentTests : BaseTest
 {
     private const string Heading = "Treatment & Chemical Batching";
