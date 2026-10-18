@@ -1,0 +1,157 @@
+name: load-performance-tests
+
+# Boots the whole stack on the runner (MySQL + 4 services), seeds realistic data and runs the JMeter suite.
+#   pull request / push : smoke (gate) -> load  (short: 10 users, 2.5 min)
+#   manual run          : pick any scenario and size from the Actions tab (including stress and spike)
+# Pass/fail criteria live in perf/jmeter/check_thresholds.py; a breach fails the job.
+
+on:
+  push:
+    branches: [develop, main]
+    paths: ['perf/**', 'AuthService/**', 'LogIntakeService/**', 'SawmillService/**', 'TreatmentService/**', '.github/workflows/load-performance-tests.yml']
+  pull_request:
+    branches: [develop, main]
+    paths: ['perf/**', 'AuthService/**', 'LogIntakeService/**', 'SawmillService/**', 'TreatmentService/**', '.github/workflows/load-performance-tests.yml']
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Scenario to run'
+        type: choice
+        options: [smoke-and-load, smoke, load, stress, spike, soak]
+        default: smoke-and-load
+      users:
+        description: 'Concurrent users for the load scenario'
+        default: '10'
+      duration:
+        description: 'Load scenario run time in seconds'
+        default: '150'
+
+jobs:
+  jmeter:
+    name: JMeter load & performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      JMETER_VERSION: '5.6.3'
+      SCENARIO: ${{ github.event.inputs.scenario || 'smoke-and-load' }}
+      USERS: ${{ github.event.inputs.users || '10' }}
+      DURATION: ${{ github.event.inputs.duration || '150' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Java (for JMeter)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache JMeter
+        id: jmeter-cache
+        uses: actions/cache@v4
+        with:
+          path: apache-jmeter-${{ env.JMETER_VERSION }}
+          key: jmeter-${{ env.JMETER_VERSION }}
+
+      - name: Install JMeter
+        if: steps.jmeter-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz" | tar xz
+
+      - name: Create schemas
+        run: |
+          mysql -h 127.0.0.1 -u root -e "CREATE DATABASE IF NOT EXISTS AuthDB"
+          mysql -h 127.0.0.1 -u root AuthDB < AuthService/Database/001_CreateUsersTable.sql
+          mysql -h 127.0.0.1 -u root AuthDB < AuthService/Database/002_CreateLoginHistoryTable.sql
+          mysql -h 127.0.0.1 -u root < LogIntakeService/Database/schema.sql
+          mysql -h 127.0.0.1 -u root < SawmillService/Database/schema.sql
+          mysql -h 127.0.0.1 -u root < TreatmentService/Database/schema.sql
+
+      - name: Seed load-test users and bulk data
+        run: |
+          mysql -h 127.0.0.1 -u root < perf/seed/seed-auth.sql
+          mysql -h 127.0.0.1 -u root < perf/seed/seed-data.sql
+
+      - name: Publish services
+        run: |
+          for s in AuthService LogIntakeService SawmillService TreatmentService; do
+            dotnet publish "$s/$s.csproj" -c Release -o "out/$s"
+          done
+
+      - name: Start services
+        run: |
+          mkdir -p logs
+          # --contentRoot is required: the step's working directory is the repo root (which has no
+          # appsettings.json), so without it AuthService crashes with "Jwt:Secret not configured"
+          # and the other services lose their connection strings. Verified locally: this exact
+          # invocation serves /swagger/v1/swagger.json.
+          start() { ASPNETCORE_URLS="http://localhost:$2" nohup dotnet "out/$1/$1.dll" --contentRoot "$GITHUB_WORKSPACE/out/$1" > "logs/$1.log" 2>&1 & }
+          start AuthService 5030
+          start LogIntakeService 5201
+          start SawmillService 5210
+          start TreatmentService 5000
+          # Kafka is intentionally not started: the HTTP APIs under test do not need it and the
+          # background consumers retry with backoff instead of crashing.
+          for port in 5030 5201 5210 5000; do
+            for i in $(seq 1 60); do
+              curl -fsS "http://localhost:$port/swagger/v1/swagger.json" -o /dev/null && { echo "port $port is up"; continue 2; }
+              sleep 2
+            done
+            echo "::error::service on port $port did not become ready"; tail -n 50 logs/*.log; exit 1
+          done
+
+      - name: Run JMeter scenarios
+        working-directory: perf/jmeter
+        run: |
+          export PATH="$GITHUB_WORKSPACE/apache-jmeter-${JMETER_VERSION}/bin:$PATH"
+          mkdir -p results
+          run() { # profile [extra jmeter args...]
+            p="$1"; shift
+            rm -rf "results/$p-report" "results/$p.jtl"   # JMeter refuses to write into a non-empty .jtl
+            jmeter -n -t timber-yard-load.jmx -q "profiles/$p.properties" -l "results/$p.jtl" -j "results/$p-jmeter.log" -e -o "results/$p-report" "$@"
+            python3 check_thresholds.py "results/$p.jtl" --profile "$p" --md "results/$p-summary.md"
+          }
+          case "$SCENARIO" in
+            smoke-and-load) run smoke; run load -Jwave1.threads="$USERS" -Jwave1.ramp=30 -Jwave1.duration="$DURATION" ;;
+            smoke)          run smoke ;;
+            load)           run load -Jwave1.threads="$USERS" -Jwave1.ramp=30 -Jwave1.duration="$DURATION" ;;
+            stress-and-spike) run stress; run spike ;;
+            *)              run "$SCENARIO" ;;
+          esac
+
+      - name: Publish results to job summary
+        if: always()
+        run: |
+          for f in perf/jmeter/results/*-summary.md; do
+            [ -f "$f" ] && { cat "$f"; echo; } >> "$GITHUB_STEP_SUMMARY"
+          done || true
+
+      - name: Upload dashboards, raw results and service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmeter-results
+          path: |
+            perf/jmeter/results/
+            logs/
+          if-no-files-found: ignore
