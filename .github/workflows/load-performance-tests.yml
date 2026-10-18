@@ -7,7 +7,7 @@ name: load-performance-tests
 
 on:
   push:
-    branches: [develop, main]
+    branches: [develop, main, feature/load-performance-testing]   # temporary: remove before the final merge
     paths: ['perf/**', 'AuthService/**', 'LogIntakeService/**', 'SawmillService/**', 'TreatmentService/**', '.github/workflows/load-performance-tests.yml']
   pull_request:
     branches: [develop, main]
