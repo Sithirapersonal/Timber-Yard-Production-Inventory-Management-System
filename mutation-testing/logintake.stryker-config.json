@@ -1,0 +1,26 @@
+{
+  "stryker-config": {
+    "project": "LogIntakeService.csproj",
+    "test-projects": [ "LogIntakeService.Tests.csproj" ],
+    "mutate": [
+      "**/Controllers/LogIntakeController.cs",
+      "**/Repositories/LogIntakeRepository.cs",
+      "**/Services/LogsConsumedConsumer.cs",
+      "**/Services/RawStockReversedConsumer.cs",
+      "**/Utils/LogVolumeCalculator.cs",
+      "!**/Migrations/**",
+      "!**/Program.cs",
+      "!**/DTOs/**",
+      "!**/Models/**",
+      "!**/Events/**",
+      "!**/Repositories/I*.cs"
+    ],
+    "reporters": [ "html", "json", "progress" ],
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "mutation-level": "Standard"
+  }
+}

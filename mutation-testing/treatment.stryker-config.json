@@ -1,0 +1,25 @@
+{
+  "stryker-config": {
+    "project": "TreatmentService.csproj",
+    "test-projects": [ "TreatmentService.Tests.csproj" ],
+    "mutate": [
+      "**/Controllers/TanksController.cs",
+      "**/Controllers/TreatmentBatchesController.cs",
+      "**/Controllers/TreatmentStockController.cs",
+      "**/Repositories/TreatmentStockRepository.cs",
+      "**/Services/SawnStockCreditedConsumer.cs",
+      "!**/Migrations/**",
+      "!**/Program.cs",
+      "!**/Models/**",
+      "!**/Events/**",
+      "!**/Repositories/I*.cs"
+    ],
+    "reporters": [ "html", "json", "progress" ],
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "mutation-level": "Standard"
+  }
+}

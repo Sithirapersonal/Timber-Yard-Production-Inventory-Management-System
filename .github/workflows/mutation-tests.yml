@@ -1,0 +1,117 @@
+name: Mutation tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      # temporary: remove before the final merge
+      - feature/mutation-testing
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - .github/workflows/mutation-tests.yml
+      - mutation-testing/**
+
+permissions:
+  contents: read
+
+jobs:
+  mutation-tests:
+    name: Stryker - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: logintake
+            test-project: LogIntakeService.Tests
+            config: logintake.stryker-config.json
+          - service: sawmill
+            test-project: SawmillService.Tests
+            config: sawmill.stryker-config.json
+          - service: treatment
+            test-project: TreatmentService.Tests
+            config: treatment.stryker-config.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore dependencies
+        run: dotnet restore "${{ matrix.test-project }}/${{ matrix.test-project }}.csproj"
+
+      - name: Run Stryker
+        working-directory: ${{ matrix.test-project }}
+        run: >-
+          dotnet stryker
+          --config-file "../mutation-testing/${{ matrix.config }}"
+          --output "../mutation-testing/output/${{ matrix.service }}"
+
+      - name: Upload mutation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report-${{ matrix.service }}
+          path: |
+            mutation-testing/output/${{ matrix.service }}/reports/mutation-report.html
+            mutation-testing/output/${{ matrix.service }}/reports/mutation-report.json
+          if-no-files-found: warn
+
+      - name: Add mutation score to job summary
+        if: always()
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+
+          service = os.environ["SERVICE"]
+          path = f"mutation-testing/output/{service}/reports/mutation-report.json"
+          print(f"## Mutation result: {service}\n")
+
+          if not os.path.exists(path):
+              print("Report not found; Stryker probably failed before writing results.")
+              raise SystemExit(0)
+
+          with open(path, encoding="utf-8") as report_file:
+              report = json.load(report_file)
+
+          counts = {}
+          for file_result in report.get("files", {}).values():
+              for mutant in file_result.get("mutants", []):
+                  status = mutant["status"]
+                  counts[status] = counts.get(status, 0) + 1
+
+          killed = counts.get("Killed", 0)
+          survived = counts.get("Survived", 0)
+          timeout = counts.get("Timeout", 0)
+          no_coverage = counts.get("NoCoverage", 0)
+          denominator = killed + survived + timeout + no_coverage
+          score = (100.0 * killed / denominator) if denominator else 0.0
+
+          print(f"**Mutation score: {score:.2f}%**\n")
+          print("| Killed | Survived | Timeout | No coverage |")
+          print("| ---: | ---: | ---: | ---: |")
+          print(f"| {killed} | {survived} | {timeout} | {no_coverage} |")
+          PY

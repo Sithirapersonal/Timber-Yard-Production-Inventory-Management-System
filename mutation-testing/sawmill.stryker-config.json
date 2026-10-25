@@ -1,0 +1,24 @@
+{
+  "stryker-config": {
+    "project": "SawmillService.csproj",
+    "test-projects": [ "SawmillService.Tests.csproj" ],
+    "mutate": [
+      "**/Controllers/SawmillController.cs",
+      "**/Utils/SawJobCalculator.cs",
+      "!**/Migrations/**",
+      "!**/Program.cs",
+      "!**/DTOs/**",
+      "!**/Models/**",
+      "!**/Events/**",
+      "!**/Repositories/**",
+      "!**/Services/**"
+    ],
+    "reporters": [ "html", "json", "progress" ],
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "mutation-level": "Standard"
+  }
+}
