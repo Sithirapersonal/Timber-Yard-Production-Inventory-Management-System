@@ -22,6 +22,20 @@ jobs:
     name: Stryker - ${{ matrix.service }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=10s
     strategy:
       fail-fast: false
       matrix:
@@ -59,12 +73,31 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore "${{ matrix.test-project }}/${{ matrix.test-project }}.csproj"
 
+      - name: Initialize MySQL schema
+        if: matrix.service == 'logintake' || matrix.service == 'treatment'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.service }}" in
+            logintake) schema="LogIntakeService/Database/schema.sql" ;;
+            treatment) schema="TreatmentService/Database/schema.sql" ;;
+            *)
+              echo "No database schema is required for ${{ matrix.service }}."
+              exit 0
+              ;;
+          esac
+          docker exec -i "${{ job.services.mysql.id }}" mysql -uroot < "$schema"
+
+      - name: Run unit tests
+        run: dotnet test "${{ matrix.test-project }}/${{ matrix.test-project }}.csproj" --nologo
+
       - name: Run Stryker
         working-directory: ${{ matrix.test-project }}
         run: >-
           dotnet stryker
           --config-file "../mutation-testing/${{ matrix.config }}"
           --output "../mutation-testing/output/${{ matrix.service }}"
+          --break-on-initial-test-failure
 
       - name: Upload mutation reports
         if: always()

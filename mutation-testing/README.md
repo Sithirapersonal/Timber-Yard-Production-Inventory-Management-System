@@ -24,6 +24,31 @@ is removed, or a string literal is replaced with `""`. If the tests fail, the mu
 **killed** - the tests noticed the bug. If the tests still pass, the mutant **survived** -
 the suite would not have caught that bug.
 
+### Vocabulary (Introduction to Software Testing, Ch. 9)
+
+- **Ground string** - the original, unmutated service code into which a mutation is inserted.
+- **Mutation operator** - a syntactic rewrite rule that creates a mutant, for example replace
+  `+` with `-`, replace `&&` with `||`, delete a statement, or replace a string literal with
+  `""`. Stryker calls these mutators.
+- **Mutant** - the ground string with exactly one mutation applied.
+- **Killed** - at least one test fails on the mutant, so the suite detects the change.
+- **Survived** - every test still passes on the mutant, so the suite does not detect it.
+- **Equivalent mutant** - a mutant that is behaviourally identical to the ground string. No
+  test can kill it; it is not a test gap.
+- **Stillborn mutant** - a mutant that does not compile. It is discarded and cannot be
+  killed or survived. Stryker reports it as `CompileError`.
+- **Mutation score** - killed mutants divided by all mutants that count, expressed as a
+  percentage: `killed / (killed + survived + timeout + no coverage) x 100`. Stryker counts
+  no-coverage mutants as missed; ignored and compile-error mutants are excluded.
+- **RIPR** - the four conditions for a test to kill a mutant: **R**eachability (the mutated
+  statement is executed), **I**nfection (the program state differs after execution),
+  **P**ropagation (the difference reaches an observable output), and **R**evealability (an
+  assertion observes the difference and fails).
+- **Strong mutation vs weak mutation** - Stryker uses **strong mutation**: a mutant is
+  killed only when a test visibly fails. Weak mutation would stop earlier, after showing
+  that the mutated statement changed internal state, without requiring propagation to an
+  output and a failing assertion.
+
 ### Result statuses
 
 - **Killed** - at least one test failed against the mutant. This is the desired outcome.
@@ -32,10 +57,14 @@ the suite would not have caught that bug.
   infinite loop). Treated as detected by Stryker, but it is not a clean kill.
 - **No coverage** - no test executed the mutated line at all, so Stryker did not run tests
   for it. This is worse than a survivor: the code is simply untested.
-- **Ignored** - Stryker generated the mutant but did not test it, because a configured
-  filter or its "block already covered" optimisation removed it.
-- **Compile error** - the mutation produced code that does not compile. Stryker discards
-  it; it is not evidence either way.
+- **Ignored** - Stryker generated the mutant but did not test it. Two built-in rules cause
+  this: the **mutate filter** (`FilePatternMutantFilter`) removes mutants in files that do
+  not match the `mutate` setting, and the **block already covered filter**
+  (`IgnoreBlockMutantFilter`) removes a block-removal mutant when another mutant inside the
+  same block is already being tested. The block filter is always enabled and is not
+  controlled by a threshold setting.
+- **Compile error** - the mutation produced code that does not compile (a stillborn
+  mutant). Stryker discards it; it is not evidence either way.
 
 **Mutation score** = killed / (killed + survived + timeout + no coverage) x 100.
 Ignored and compile-error mutants are not in the denominator. Stryker therefore counts
@@ -129,22 +158,33 @@ tests touch a real database.
 - **Configuration:** `mutation-level: Standard`, thresholds high 80 / low 60 / break 0
 - **Runs:** one run per service, executed sequentially
 
-| Service | Mutation score | Killed | Survived | Timeout | No coverage | Ignored | Compile errors | Mutants tested | Run time |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| LogIntakeService | **26.40 %** | 113 | 50 | 0 | 265 | 189 | 44 | 163 | 3m 24s |
-| SawmillService | **31.44 %** | 61 | 18 | 0 | 115 | 629 | 110 | 79 | 2m 07s |
-| TreatmentService | **65.05 %** | 430 | 54 | 0 | 177 | 206 | 32 | 484 | 7m 59s |
+| Service | Test cases | Mutation score | Score on tested mutants | Killed | Survived | Timeout | No coverage | Ignored | Compile errors | Mutants tested | Run time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| LogIntakeService | 40 | **26.40 %** | 69.33 % | 113 | 50 | 0 | 265 | 189 | 44 | 163 | 3m 24s |
+| SawmillService | 32 | **31.44 %** | 77.22 % | 61 | 18 | 0 | 115 | 629 | 110 | 79 | 2m 07s |
+| TreatmentService | 42 | **65.05 %** | 88.84 % | 430 | 54 | 0 | 177 | 206 | 32 | 484 | 7m 59s |
 
-"Mutants created" was 661 for LogIntake, 933 for Sawmill and 899 for Treatment. Ignored
-counts are the sum of Stryker's "already covered block" and "mutate filter" removals.
+"Mutants tested" is killed + survived + timeout. "Score on tested mutants" is killed /
+(killed + survived), which removes the effect of no-coverage mutants.
 
-The same score expressed against **tested** mutants only (killed / (killed + survived)):
+Stryker created 661 / 933 / 899 mutants before applying the mutate filter. The ignored and
+compile-error counts are the totals Stryker printed at the end of the run; they include
+mutants in files excluded by the `mutate` patterns, so they are larger than the counts in
+the HTML/JSON report, which only contains files that passed the file filter. The killed,
+survived and no-coverage counts are the report counts.
 
-| Service | Tested-mutant kill rate |
-| --- | ---: |
-| LogIntakeService | 69.33 % |
-| SawmillService | 77.22 % |
-| TreatmentService | 88.84 % |
+### CI note
+
+The first CI run (run 40197246760) was invalid for LogIntake and Treatment. The MySQL
+integration tests could not connect on `ubuntu-latest`: 3 LogIntake tests and 19 Treatment
+tests failed. Stryker continued after the initial test failure and, with `break: 0`, the
+job still passed. It reported 7.48 % for LogIntake and 6.66 % for Treatment, against
+26.40 % and 65.05 % locally. Sawmill was unaffected and matched local at 31.44 %.
+
+The workflow now starts a MySQL 8.0 service with a health check, loads
+`LogIntakeService/Database/schema.sql` or `TreatmentService/Database/schema.sql` only for
+the service that needs it, runs `dotnet test` as a hard gate before Stryker, and passes
+`--break-on-initial-test-failure`. The thresholds remain high 80 / low 60 / break 0.
 
 ### Per-file scores
 
@@ -171,6 +211,31 @@ above; ignored and compile-error mutants are excluded.
 The lists below are the most meaningful survivors, not every survivor. String-literal
 survivors that only change log or response wording are mostly omitted unless the wording
 is the only thing a caller can observe.
+
+### Worked RIPR example: `SawmillController.cs:267`
+
+The survivor at line 267 is a good example of the four RIPR conditions.
+
+- **Ground string:** `createdJob.AssignedWorkerNames = workers.Select(w => $"{w.FullName} ({w.EmployeeCode})").ToList();`
+- **Mutant (string mutation):** the interpolated string becomes `$""`, so each assigned
+  worker name is the empty string.
+- **Reachability:** `StartSawJob_Success_Returns201AndPublishesLogsConsumedEvent` calls
+  `StartSawJob` with `WorkerIds = { 1 }`, so line 267 executes.
+- **Infection:** after the call, `createdJob.AssignedWorkerNames` contains `""` instead of
+  the worker's name and employee code, so the program state differs.
+- **Propagation:** `createdJob` is returned in the 201 response, so the infected value
+  reaches an observable output.
+- **Revealability:** the test asserts the status code and the published
+  `LogsConsumedEvent`, but never inspects `AssignedWorkerNames`, so no assertion fails.
+
+The mutant survives because revealability is missing: the test has no oracle for that
+field. It is **not** an equivalent mutant.
+
+The `Sum` -> `Max` survivor at `SawmillController.cs:203` is a different case. The only
+start-job fixture sends `LogIds = { 101 }`, so sum and max both equal 0.6721: the mutant is
+reached but **not infected**. With two logs it would be infected, but the test still would
+not reveal it because it never asserts `TotalVolumeM3`. A multi-log fixture plus an
+assertion on the total would kill it.
 
 ### LogIntakeService
 
@@ -218,8 +283,8 @@ The single `SawJobCalculator` survivor is the exception message at line 42; test
 
 1. **`Repositories/TreatmentStockRepository.cs:100`** - `result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0m` became `||` and the ternary was forced to `true`.
    *Why missed:* `GetStockBalanceAsync` is only called for species/dimensions that exist; the "no row, return 0m" path is never tested. **Untested condition.**
-2. **`Repositories/TreatmentStockRepository.cs:171`** - `await transaction.RollbackAsync();` became `;` in the over-allocation path.
-   *Why missed:* the test asserts the exception and the unchanged balance, but not that the transaction was actually rolled back. **Untested error-path side effect.**
+2. **`Repositories/TreatmentStockRepository.cs:171`, `:228`, `:403`, `:417`, `:441`, `:537`, `:590`, `:597`, `:647`** - an explicit `await transaction.RollbackAsync();` became `;`.
+   *Why missed:* the tests assert the exception and the unchanged data, but not that the transaction was actually rolled back. **Probably equivalent:** each transaction is `await using`, so when the exception propagates without a commit, disposal rolls the transaction back anyway. These are still worth a test that asserts no partial rows were written, but they may not be killable without changing the code.
 3. **`Repositories/TreatmentStockRepository.cs:268`** - `return batches.FirstOrDefault();` became `First()`.
    *Why missed:* `GetBatchByIdAsync` is never called with an unknown batch ID. **Untested error path.**
 4. **`Repositories/TreatmentStockRepository.cs:283`** - `b.CompletedAt.Value >= fromUtc.Value` became `>`.
@@ -231,7 +296,7 @@ The single `SawJobCalculator` survivor is the exception message at line 42; test
 7. **`Repositories/TreatmentStockRepository.cs:319`** - `.Where(h => h >= 0)` became `h > 0`.
    *Why missed:* a zero-duration (same start and completion time) batch is not part of the fixture. **Untested boundary.**
 8. **`Repositories/TreatmentStockRepository.cs:326-327`** - `durations.Count > 0 ? durations.Min()/Max() : 0` became `>= 0` and `Max()` became `Min()`.
-   *Why missed:* every chemical-type group has at least one duration, and each group appears to contain a single batch, so min and max are the same value and the empty-group branch never runs. **Untested condition / missing multi-row fixture.**
+   *Why missed:* every chemical-type group has at least one duration, and each group appears to contain a single batch, so min and max are the same value and the empty-group branch never runs. This is **not** an equivalent mutant; the current single-batch fixture simply cannot distinguish the min and max paths. **Untested condition / missing multi-row fixture.**
 9. **`Repositories/TreatmentStockRepository.cs:450`** - the `ArgumentException` message for a blank cancellation reason became `""`.
    *Why missed:* the test asserts the exception type, not the message. **Missing assertion.**
 10. **`Repositories/TreatmentStockRepository.cs:807`** - `Status = hasBatch ? "Busy" : "Idle"` became always `"Idle"`.
@@ -309,17 +374,20 @@ passing build would still allow a real bug through.
 - **Sawmill's repository, Kafka producers/consumers, HTTP client and producer guard are
   excluded** because no unit test targets them. Their real mutation score is unknown.
 - **LogIntake and Treatment include MySQL integration-style tests** (`localhost`,
-  `LogIntakeDB` / `TreatmentDB`). They passed on this machine because MySQL was running.
-  They will not pass on a clean CI runner unless MySQL and the schemas are provisioned.
+  `LogIntakeDB` / `TreatmentDB`). Locally they need MySQL running. The CI workflow now
+  starts MySQL 8.0 and loads the matching `Database/schema.sql` before running them.
 - **One run per service, on one machine.** Mutation scores can vary slightly with test
   ordering, timeouts, database state and hardware. These numbers are a baseline, not a
   statistically stable measurement.
 - **The score counts no-coverage mutants as missed.** The tested-mutant kill rate is shown
   separately so the two effects are not confused.
-- **Equivalent mutants:** a few survivors may be behaviourally identical to the original
-  code. They were not manually triaged one by one.
-- **Compile-error mutants** (44 / 110 / 32) are excluded from scoring. Sawmill's count is
-  high because Stryker's safe mode removed mutations in excluded `LogIntakeClient` methods.
+- **Equivalent mutants:** the explicit rollback removals in `TreatmentStockRepository`
+  (`:171`, `:228`, `:403`, `:417`, `:441`, `:537`, `:590`, `:597`, `:647`) are probably
+  equivalent because transaction disposal rolls back on the exception path. They are marked
+  in the survivor list. The remaining survivors were not exhaustively triaged one by one.
+- **Compile-error mutants** (44 / 110 / 32) are excluded from scoring. Sawmill's 110 is 26
+  ordinary compile errors in the included files plus 84 mutations that Stryker's Safe Mode
+  removed from the excluded `LogIntakeClient` methods.
 - **The test counts differ from the brief** (40 / 32 / 42 executed cases instead of
   28 / 22 / 32). The brief probably counted `[Fact]`/`[Theory]` methods; xUnit counts each
   theory case separately.
@@ -327,9 +395,11 @@ passing build would still allow a real bug through.
 ## CI
 
 `.github/workflows/mutation-tests.yml` runs the same three configs in a matrix
-(`fail-fast: false`) on `ubuntu-latest`. It restores the local tool, restores NuGet
-packages, runs Stryker, uploads the HTML and JSON reports as one artifact per service and
-writes the score and counts to the job summary.
+(`fail-fast: false`) on `ubuntu-latest`. It restores the local tool and NuGet packages,
+starts a MySQL 8.0 service with a health check, loads the matching schema only for
+LogIntake/Treatment, runs `dotnet test` as a hard gate, then runs Stryker with
+`--break-on-initial-test-failure`. It uploads the HTML and JSON reports as one artifact per
+service and writes the score and counts to the job summary.
 
 Triggers:
 
