@@ -38,13 +38,23 @@ jobs:
           /o:"sithirapersonal"
           /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
           /d:sonar.host.url="https://sonarcloud.io"
-          /d:sonar.cs.vscoveragexml.reportsPaths=coverage.xml
+          /d:sonar.cs.vscoveragexml.reportsPaths="coverage/*.xml"
 
-      - name: Build
-        run: dotnet build
+      - name: Build all projects
+        run: |
+          for proj in $(find . -name "*.csproj" -not -path "*/node_modules/*"); do
+            echo "Building $proj"
+            dotnet build "$proj" || exit 1
+          done
 
       - name: Test with coverage
-        run: dotnet-coverage collect "dotnet test" -f xml -o coverage.xml
+        run: |
+          mkdir -p coverage
+          for proj in $(grep -rl "Microsoft.NET.Test.Sdk" --include=*.csproj .); do
+            name=$(basename "$proj" .csproj)
+            echo "Testing $proj"
+            dotnet-coverage collect "dotnet test $proj" -f xml -o "coverage/$name.xml"
+          done
 
       - name: End analysis
         run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
