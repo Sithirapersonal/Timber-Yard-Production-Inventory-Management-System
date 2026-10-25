@@ -15,12 +15,102 @@ on:
       - '.github/workflows/treatment-service-ci-cd.yml'
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Stage 1: Isolated Unit Testing & Code Coverage Quality Gate
+  # Runs in seconds without spinning up external MySQL or Kafka containers.
+  # ─────────────────────────────────────────────────────────────────────────
+  unit-test-and-coverage:
+    name: Unit Tests & Quality Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: |
+          dotnet restore TreatmentService/TreatmentService.csproj
+          dotnet restore TreatmentService.Tests/TreatmentService.Tests.csproj
+
+      - name: Build Projects
+        run: |
+          dotnet build TreatmentService/TreatmentService.csproj -c Release --no-restore
+          dotnet build TreatmentService.Tests/TreatmentService.Tests.csproj -c Release --no-restore
+
+      - name: Execute Isolated Unit Tests with Coverage
+        run: |
+          dotnet test TreatmentService.Tests/TreatmentService.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --filter "FullyQualifiedName~TreatmentBatchesControllerTests|FullyQualifiedName~SawnStockCreditedConsumerTests" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults \
+            --logger "trx;LogFileName=unit_tests.trx"
+
+      - name: Install ReportGenerator Tool
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Generate HTML & Markdown Coverage Reports
+        run: |
+          reportgenerator \
+            -reports:"TestResults/**/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
+            -reporttypes:"Html;MarkdownSummaryGithub;Badges;JsonSummary" \
+            -thresholdhigh:80 \
+            -thresholdlow:60
+
+      - name: Publish Coverage Summary to GitHub Step Summary
+        run: cat CoverageReport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Enforce Code Coverage Quality Gate (80% Line & Branch)
+        shell: pwsh
+        run: |
+          $summary = Get-Content -Raw -Path "CoverageReport/Summary.json" | ConvertFrom-Json
+          $target = $summary.coverage.assemblies[0].classesinassembly | Where-Object { $_.name -eq "TreatmentService.Controllers.TreatmentBatchesController" }
+          
+          $lineCoverage = [math]::Round($target.coverage, 2)
+          $branchCoverage = [math]::Round($target.branchcoverage, 2)
+          
+          Write-Host "Target: TreatmentBatchesController"
+          Write-Host "Line Coverage:   $lineCoverage% (Threshold: 80%)"
+          Write-Host "Branch Coverage: $branchCoverage% (Threshold: 80%)"
+          
+          if ($lineCoverage -lt 80.0 -or $branchCoverage -lt 80.0) {
+            Write-Error "QUALITY GATE FAILED: Code coverage is below the mandatory 80% threshold!"
+            exit 1
+          } else {
+            Write-Host "QUALITY GATE PASSED: Code coverage satisfies production standards."
+          }
+
+      - name: Upload Test Results (.trx) Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: treatment-service-unit-test-results
+          path: TestResults/*.trx
+
+      - name: Upload HTML Coverage Report Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: treatment-service-coverage-report
+          path: CoverageReport/
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Stage 2: Integration Tests & Docker Verification
+  # ─────────────────────────────────────────────────────────────────────────
   build-and-test:
-    name: Build & Run Tests
+    name: Build & Run Integration Tests
+    needs: unit-test-and-coverage
     runs-on: ubuntu-latest
 
     # The treatment integration tests connect to MySQL at
-    # Server=localhost;Database=TreatmentDB;User=root;Password=;
+    # Server=localhost;Database=TreatmentDB;User=root;Password=root;
     # so the runner needs a matching MySQL instance.
     services:
       mysql:
@@ -58,15 +148,18 @@ jobs:
       - name: Build Tests
         run: dotnet build TreatmentService.Tests/TreatmentService.Tests.csproj --no-restore -c Release
 
-      - name: Run Unit Tests
+      - name: Run Integration Tests
         run: dotnet test TreatmentService.Tests/TreatmentService.Tests.csproj --no-build -c Release --verbosity normal
 
       - name: Verify Docker Build
         run: docker build -t timber-yard-treatment-service:ci-test -f TreatmentService/Dockerfile .
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # Stage 3: Azure WebApp Deployment
+  # ─────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to Azure
-    needs: build-and-test
+    needs: [unit-test-and-coverage, build-and-test]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
